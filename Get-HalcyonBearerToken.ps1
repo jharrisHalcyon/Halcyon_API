@@ -1,6 +1,6 @@
 ##############################################################################
 # Get-HalcyonBearerToken.ps1
-# Author  : Jim Harris -- Halcyon Senior SA
+# Author  : Jim Harris -- Halcyon SA
 # Date    : 2026-02-23
 # Version : v1_0
 #
