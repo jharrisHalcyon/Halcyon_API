@@ -1,45 +1,79 @@
 ##############################################################################
 # Get-HalcyonBearerToken.ps1
-# Author  : Jim Harris -- Halcyon SA
-# Date    : 2026-02-23
-# Version : v1_0
+# Author  : Jim Harris -- Halcyon Senior SA
+# Date    : 2026-02-24
+# Version : v1.2
 #
 # Authenticates against the Halcyon Identity endpoint and returns a Bearer
 # token for use in subsequent API calls. Prompts interactively for Tenant ID,
 # login email, and password. Plaintext password is zeroed from memory
 # immediately after the request completes.
 #
+# Decodes the returned JWT to display real expiry times. The Halcyon auth
+# response does not include a top-level TTL field -- expiry is embedded as
+# standard 'exp' claims inside the JWT payloads.
+#
+# Current Halcyon token TTLs (as of v1.1 validation):
+#   Access token   :  5 minutes
+#   Refresh token  : 15 minutes
+#
+# For long-running scripts or SOC integrations, use Invoke-HalcyonTokenRefresh.ps1
+# to exchange the refresh token for a new access token before it expires.
+#
 # Usage:
 #   .\Get-HalcyonBearerToken.ps1
 #
-#   Capture token for use in other scripts:
-#   $token = .\Get-HalcyonBearerToken.ps1
+#   Capture tokens for use in other scripts:
+#   $auth = .\Get-HalcyonBearerToken.ps1
+#   $auth.AccessToken
+#   $auth.RefreshToken
+#
+#   Suppress all decorative output (errors and warnings still show):
+#   $auth = .\Get-HalcyonBearerToken.ps1 -silent
 #
 #   Tenant ID is not displayed in the Halcyon console UI. To retrieve yours,
 #   contact support@halcyon.ai with your org name and console email address.
 #
 # Requires:
 #   PowerShell 5.1+
-#   Valid Halcyon console credentials
+#   Valid Halcyon console credentials (non-SSO / service account)
 #   Outbound HTTPS to api.halcyon.ai
+#   ConvertFrom-HalcyonJwt.ps1 in the same directory
 #
 # Endpoint:
 #   POST https://api.halcyon.ai/identity/auth/login
 #
+# IMPORTANT -- SSO tenants:
+#   If your tenant enforces SSO, personal credentials will not work here.
+#   You need a dedicated service account provisioned outside SSO enforcement.
+#   Open a ticket at support@halcyon.ai to request one.
+#
 ##############################################################################
+
+#Requires -Version 5.1
+
+param(
+    # Suppress all decorative console output. Errors and warnings are always
+    # shown regardless. Useful when calling from automation or a test harness.
+    [switch]$silent
+)
 
 $ErrorActionPreference = "Stop"
 
-Write-Host ""
-Write-Host "=== Halcyon API Bearer Token Retrieval ===" -ForegroundColor Cyan
-Write-Host ""
+# Dot-source the shared JWT helper from the same directory as this script
+. (Join-Path $PSScriptRoot "ConvertFrom-HalcyonJwt.ps1")
+
+if (-not $silent) {
+    Write-Host ""
+    Write-Host "=== Halcyon API Bearer Token Retrieval ===" -ForegroundColor Cyan
+    Write-Host ""
+}
 
 # Prompt for required inputs
-$TenantId = Read-Host "Enter Tenant ID"
-$Username = Read-Host "Enter Halcyon Login Email"
+$TenantId       = Read-Host "Enter Tenant ID"
+$Username       = Read-Host "Enter Halcyon Login Email"
 $SecurePassword = Read-Host "Enter Halcyon Password" -AsSecureString
 
-# Convert SecureString to plaintext temporarily (in-memory only)
 $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword)
 
 try {
@@ -62,34 +96,55 @@ try {
 
 }
 finally {
-    # Wipe plaintext password from memory
+    # Zero the plaintext password from memory regardless of success or failure
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
     Remove-Variable PlainPassword -ErrorAction SilentlyContinue
-    Remove-Variable Body -ErrorAction SilentlyContinue
+    Remove-Variable Body          -ErrorAction SilentlyContinue
 }
 
 if (-not $Response.accessToken) {
     Write-Host ""
-    Write-Host "[FAIL] No access token returned. Check credentials or RBAC permissions." -ForegroundColor Red
+    Write-Host "[FAIL] No access token returned. Check credentials and RBAC permissions." -ForegroundColor Red
+    Write-Host "       If your tenant enforces SSO, a service account is required." -ForegroundColor Yellow
     exit 1
 }
 
-$AccessToken  = $Response.accessToken
-$RefreshToken = $Response.refreshToken
-$ExpiresIn    = $Response.expiresIn
+# Decode both JWTs to get real expiry information
+$accessInfo  = Get-HalcyonTokenExpiry -Token $Response.accessToken  -Label "Access Token"
+$refreshInfo = Get-HalcyonTokenExpiry -Token $Response.refreshToken -Label "Refresh Token"
 
-Write-Host ""
-Write-Host "=== Authentication Successful ===" -ForegroundColor Green
-Write-Host ""
-Write-Host "Tenant ID     : $TenantId"
-Write-Host "User          : $Username"
-Write-Host "Token Length  : $($AccessToken.Length)"
-Write-Host "Expires In    : $ExpiresIn seconds"
-Write-Host ""
+if (-not $silent) {
+    Write-Host ""
+    Write-Host "=== Authentication Successful ===" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Tenant ID        : $TenantId"
+    Write-Host "User             : $($accessInfo.Email)"
+    Write-Host ""
+    Write-Host "--- Access Token ---" -ForegroundColor Yellow
+    Write-Host "  Length         : $($Response.accessToken.Length) chars"
+    Write-Host "  Issued At      : $($accessInfo.IssuedAt)"
+    Write-Host "  Expires At     : $($accessInfo.ExpiresAt)"
+    Write-Host "  TTL            : $($accessInfo.TtlSeconds) seconds ($([math]::Round($accessInfo.TtlSeconds / 60, 1)) min)"
+    Write-Host "  Time Remaining : $($accessInfo.SecondsRemaining) seconds" -ForegroundColor $(if ($accessInfo.SecondsRemaining -lt 60) { 'Red' } else { 'Green' })
+    Write-Host ""
+    Write-Host "--- Refresh Token ---" -ForegroundColor Cyan
+    Write-Host "  Length         : $($Response.refreshToken.Length) chars"
+    Write-Host "  Expires At     : $($refreshInfo.ExpiresAt)"
+    Write-Host "  TTL            : $($refreshInfo.TtlSeconds) seconds ($([math]::Round($refreshInfo.TtlSeconds / 60, 1)) min)"
+    Write-Host "  Time Remaining : $($refreshInfo.SecondsRemaining) seconds" -ForegroundColor $(if ($refreshInfo.SecondsRemaining -lt 60) { 'Red' } else { 'Green' })
+    Write-Host ""
+    Write-Host "Use Invoke-HalcyonTokenRefresh.ps1 to renew before expiry." -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "Bearer Token:" -ForegroundColor Yellow
+    Write-Host $Response.accessToken -ForegroundColor White
+    Write-Host ""
+}
 
-Write-Host "Bearer Token:" -ForegroundColor Yellow
-Write-Host $AccessToken -ForegroundColor White
-Write-Host ""
-
-# Output token to pipeline so it can be captured like:
-# $token = .\Get-HalcyonToken.ps1
+# Return a structured object to the pipeline so callers can capture both tokens
+[PSCustomObject]@{
+    AccessToken        = $Response.accessToken
+    RefreshToken       = $Response.refreshToken
+    TenantId           = $TenantId
+    AccessExpiresAt    = $accessInfo.ExpiresAt
+    RefreshExpiresAt   = $refreshInfo.ExpiresAt
+}
