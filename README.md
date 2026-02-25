@@ -1,4 +1,4 @@
-# Halcyon API PowerShell Toolkit
+# Halcyon API Toolkit
 
 PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public API. Built and maintained by the Halcyon Solutions Engineering team.
 
