@@ -1,6 +1,6 @@
 # Halcyon API Toolkit
 
-PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public API. Built and maintained by the Halcyon Solutions Engineering team.
+PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public API. Built and maintained by the Halcyon Solutions Architecture team.
 
 > **Audience:** Security engineers, SOC teams, and IT administrators who want to automate Halcyon workflows via the API rather than the console.
 
