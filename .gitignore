@@ -1,0 +1,27 @@
+# Test harness log files
+*.log
+
+# Audit log CSV exports
+*.csv
+
+# VS Code workspace settings
+.vscode/
+
+# Windows filesystem noise
+Thumbs.db
+Desktop.ini
+
+# macOS filesystem noise
+.DS_Store
+
+# PowerShell credential exports (just in case)
+*.cred
+*.credential
+
+# Certificate files -- do not commit real certs
+*.cer
+*.crt
+*.pfx
+*.p12
+*.pem
+*.der

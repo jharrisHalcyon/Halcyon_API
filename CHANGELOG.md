@@ -6,6 +6,36 @@ Versions are per-script. Each script maintains its own version number in its fil
 
 ---
 
+## 2026-02-25
+
+### Get-HalcyonWhoAmI.ps1 -- v1.0
+
+Initial release.
+
+- Diagnostic script. Calls three identity endpoints in a single pass: `GET /identity/user` (profile), `GET /identity/user/effective-role` (role in current tenant), `GET /identity/user/roles` (all roles across all tenants).
+- Prints a color-coded capability summary mapping the current RBAC level to specific operations: override creation, override deletion, tag management, install token generation, policy group management, audit log export, and tenant creation.
+- Color coding by access level: TenantAdmin (magenta), Admin (green), PowerUser (cyan), User (white), ReadOnly (dark cyan).
+- Returns a structured `PSCustomObject` for pipeline use containing `Id`, `Email`, `Name`, `Role`, `EffectiveRole`, `EffectiveGroup`, `AllRoles`.
+- Note: the `role` field on `GET /identity/user` does not populate for all account types. `EffectiveRole` from `GET /identity/user/effective-role` is the authoritative value.
+- Live test confirmed: service account has `Admin` effective role across two tenants. `TenantAdmin` is not assigned -- tenant creation and deletion require a separate request to Halcyon support.
+
+---
+
+### Get-HalcyonAuditLog.ps1 -- v1.0
+
+Initial release.
+
+- Exports the audit log for a tenant via `POST /v2/audit-logs/export` with an optional timestamp window (default: last 24 hours).
+- Async job pattern: submits export request, receives `reportId`, polls `GET /v2/jobs/{reportId}` at configurable intervals until status is `Completed`, `Failed`, or `Deleted`.
+- On completion, attempts to auto-discover the CSV download URL by inspecting the job response for known URL field names (`downloadUrl`, `url`, `reportUrl`, `fileUrl`, `link`, `href`, `location`) and then trying common REST endpoint patterns if no URL field is found. Full job response is always printed to console to aid in URL discovery if auto-detection fails.
+- Parses the downloaded CSV using `ConvertFrom-Csv` and applies an optional `-Filter` keyword across all fields in every row.
+- `-SaveCsv` switch writes the raw CSV to a timestamped file before filtering.
+- `-TargetTenantId` parameter allows targeting a specific subtenant independently of the authenticated tenant.
+- Returns filtered rows as `PSCustomObject` array for pipeline use.
+- Requires `Admin` RBAC.
+
+---
+
 ## 2026-02-24
 
 ### ConvertFrom-HalcyonJwt.ps1 -- v1.0
@@ -131,4 +161,3 @@ Initial release.
 
 ---
 
-*Format inspired by [Keep a Changelog](https://keepachangelog.com). Dates in `YYYY-MM-DD` format.*
