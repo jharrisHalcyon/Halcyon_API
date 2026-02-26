@@ -1,6 +1,6 @@
-# Halcyon API Toolkit
+# Halcyon API PowerShell Toolkit
 
-PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public API. Built and maintained by the Halcyon Solutions Architecture team.
+PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public API. Built and maintained by the Halcyon Solutions Engineering team.
 
 > **Audience:** Security engineers, SOC teams, and IT administrators who want to automate Halcyon workflows via the API rather than the console.
 
@@ -22,6 +22,8 @@ PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public
   - [New-HalcyonOverride.ps1](#new-halcyonoverrideps1)
   - [Remove-HalcyonOverride.ps1](#remove-halcyonoverrideps1)
   - [Invoke-HalcyonOverrideTests.ps1](#invoke-halcyonoverridetestsps1)
+  - [Get-HalcyonWhoAmI.ps1](#get-halcyonwhoamips1)
+  - [Get-HalcyonAuditLog.ps1](#get-halcyonauditlogps1)
 - [Override Types](#override-types)
   - [Certificate](#certificate-overrides)
   - [File / Hash](#file--hash-overrides)
@@ -43,6 +45,8 @@ This repo provides a set of composable PowerShell scripts that wrap the Halcyon 
 Get-HalcyonBearerToken  -->  New-HalcyonOverride
                          -->  Remove-HalcyonOverride
                          -->  Invoke-HalcyonTokenRefresh  -->  (loop)
+                         -->  Get-HalcyonWhoAmI
+                         -->  Get-HalcyonAuditLog
 ```
 
 All scripts follow PowerShell conventions: named parameters, `-WhatIf` support where destructive, structured `PSCustomObject` return values, and errors through the standard error stream.
@@ -348,6 +352,97 @@ $auth = .\Get-HalcyonBearerToken.ps1
 
 Log files are written to the same directory as the script with the format `HalcyonOverrideTest_YYYYMMDD_HHmmss.log`.
 
+### Get-HalcyonWhoAmI.ps1
+
+**Version:** v1.0
+**Purpose:** Identity and RBAC diagnostic. Calls three identity endpoints in a single pass to display the current user's profile, effective role in the authenticated tenant, and all roles across all tenants. Prints a capability summary showing which operations are available at the current RBAC level.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `-AuthObject` | PSCustomObject | Yes* | Auth object from `Get-HalcyonBearerToken.ps1` |
+| `-AccessToken` | string | Yes* | Access token (alternative to `-AuthObject`) |
+| `-TenantId` | string | Yes* | Tenant ID (alternative to `-AuthObject`) |
+
+*One of `-AuthObject` or both `-AccessToken` and `-TenantId` required.
+
+**Returns:** `PSCustomObject` with `Id`, `Email`, `Name`, `Role`, `EffectiveRole`, `EffectiveGroup`, `AllRoles`
+
+**RBAC levels (lowest to highest):**
+
+| Level | Description |
+|---|---|
+| `ReadOnly` | Read-only access to most resources |
+| `User` | Basic operational access |
+| `PowerUser` | Create overrides, manage tags, generate install tokens |
+| `Admin` | Delete overrides, manage policy groups, export audit logs |
+| `TenantAdmin` | Create and delete tenants |
+
+**Usage:**
+
+```powershell
+$auth = .\Get-HalcyonBearerToken.ps1
+.\Get-HalcyonWhoAmI.ps1 -AuthObject $auth
+
+# Capture result for pipeline use
+$me = .\Get-HalcyonWhoAmI.ps1 -AuthObject $auth
+Write-Host "Effective role: $($me.EffectiveRole)"
+```
+
+---
+
+### Get-HalcyonAuditLog.ps1
+
+**Version:** v1.0
+**Purpose:** Exports the audit log for a tenant as CSV, polls until the async report job completes, downloads the result, and optionally filters rows by keyword. Useful for confirming specific actions such as policy changes by a particular user or email domain.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-AuthObject` | PSCustomObject | | Auth object from `Get-HalcyonBearerToken.ps1` |
+| `-AccessToken` | string | | Access token (alternative to `-AuthObject`) |
+| `-TenantId` | string | | Tenant ID (alternative to `-AuthObject`) |
+| `-TargetTenantId` | string | | Override the tenant for the API call (target a specific subtenant) |
+| `-HoursBack` | int | 24 | Time window in hours |
+| `-Filter` | string | | Keyword filter applied to all CSV fields after download |
+| `-PollIntervalSeconds` | int | 5 | Job status polling interval |
+| `-TimeoutSeconds` | int | 120 | Maximum wait time for report completion |
+| `-SaveCsv` | switch | off | Write raw CSV to disk |
+| `-CsvPath` | string | | Path for saved CSV (defaults to timestamped file in current directory) |
+
+**Returns:** Array of parsed CSV rows as `PSCustomObject` (pipeline-compatible)
+
+**Requires:** `Admin` RBAC role
+
+**Usage:**
+
+```powershell
+# Last 24 hours, all entries
+.\Get-HalcyonAuditLog.ps1 -AuthObject $auth
+
+# Filter for policy-related changes
+.\Get-HalcyonAuditLog.ps1 -AuthObject $auth -Filter "policy"
+
+# Filter for a specific user or domain
+.\Get-HalcyonAuditLog.ps1 -AuthObject $auth -Filter "vancouverclinic"
+
+# Target a specific tenant
+.\Get-HalcyonAuditLog.ps1 -AuthObject $auth `
+    -TargetTenantId "b30d3702-780f-4322-8990-3f76049ed5a5" `
+    -Filter "policy"
+
+# Save raw CSV and filter output
+.\Get-HalcyonAuditLog.ps1 -AuthObject $auth -HoursBack 48 -Filter "policy" -SaveCsv
+
+# Pipeline -- further filter results in PowerShell
+$rows = .\Get-HalcyonAuditLog.ps1 -AuthObject $auth -Filter "policy"
+$rows | Where-Object { $_.user -match "vancouverclinic" }
+```
+
+> **Note:** The audit log export is an async job. The script submits the request, polls `GET /v2/jobs/{reportId}` until completion, then downloads the CSV. The full job response is printed to the console on completion -- this is intentional, as the download URL field name is not documented in the API spec and may need to be confirmed from a live response.
+
 ---
 
 ## Override Types
@@ -501,6 +596,8 @@ All scripts are deployed to the repository root. When updating a script, bump th
 | `New-HalcyonOverride.ps1` | v1.1 |
 | `Remove-HalcyonOverride.ps1` | v1.0 |
 | `Invoke-HalcyonOverrideTests.ps1` | v1.1 |
+| `Get-HalcyonWhoAmI.ps1` | v1.0 |
+| `Get-HalcyonAuditLog.ps1` | v1.0 |
 
 ---
 
