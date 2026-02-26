@@ -19,9 +19,12 @@ PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public
   - [ConvertFrom-HalcyonJwt.ps1](#convertfrom-halcyonjwtps1)
   - [Get-HalcyonBearerToken.ps1](#get-halcyonbearertokenps1)
   - [Invoke-HalcyonTokenRefresh.ps1](#invoke-halcyontokenrefreshps1)
+  - [Get-HalcyonAlerts.ps1](#get-halcyonalertsps1)
+  - [Get-HalcyonDevices.ps1](#get-halcyondevicesps1)
+  - [Remove-HalcyonDevice.ps1](#remove-halcyondeviceps1)
+  - [Get-HalcyonOverrides.ps1](#get-halcyonoverridesps1)
   - [New-HalcyonOverride.ps1](#new-halcyonoverrideps1)
   - [Remove-HalcyonOverride.ps1](#remove-halcyonoverrideps1)
-  - [Invoke-HalcyonOverrideTests.ps1](#invoke-halcyonoverridetestsps1)
   - [Get-HalcyonWhoAmI.ps1](#get-halcyonwhoamips1)
   - [Get-HalcyonAuditLog.ps1](#get-halcyonauditlogps1)
 - [Override Types](#override-types)
@@ -32,6 +35,8 @@ PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public
   - [IpAddress / Host](#ipaddress--host-overrides)
   - [Dns](#dns-overrides)
 - [Working with Notes](#working-with-notes)
+- [VDI Device Hygiene](#vdi-device-hygiene)
+- [SIEM Integration](#siem-integration)
 - [Versioning](#versioning)
 - [Diagnostics](#diagnostics)
 
@@ -42,7 +47,10 @@ PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public
 This repo provides a set of composable PowerShell scripts that wrap the Halcyon REST API. Scripts are designed to be run standalone or chained together via the pipeline -- the output of one script feeds naturally into the input of the next.
 
 ```
-Get-HalcyonBearerToken  -->  New-HalcyonOverride
+Get-HalcyonBearerToken  -->  Get-HalcyonAlerts
+                         -->  Get-HalcyonDevices  -->  Remove-HalcyonDevice
+                         -->  Get-HalcyonOverrides
+                         -->  New-HalcyonOverride
                          -->  Remove-HalcyonOverride
                          -->  Invoke-HalcyonTokenRefresh  -->  (loop)
                          -->  Get-HalcyonWhoAmI
@@ -70,12 +78,18 @@ All scripts must be run from the same directory, or `$PSScriptRoot` must resolve
 # 1. Authenticate and capture the auth object
 $auth = .\Get-HalcyonBearerToken.ps1
 
-# 2. Create a certificate override
+# 2. List recent alerts
+$alerts = .\Get-HalcyonAlerts.ps1 -AuthObject $auth -LastSeenAfter (Get-Date).AddDays(-7)
+
+# 3. Check for duplicate device registrations (VDI environments)
+.\Get-HalcyonDevices.ps1 -AuthObject $auth -FindDuplicates -AllPages
+
+# 4. Create a certificate override
 $result = .\New-HalcyonOverride.ps1 -AuthObject $auth `
     -Kind Certificate `
     -CertificatePath "C:\certs\sophos.cer"
 
-# 3. Remove it when done
+# 5. Remove it when done
 .\Remove-HalcyonOverride.ps1 -AuthObject $auth -OverrideId $result.id
 ```
 
@@ -132,7 +146,7 @@ For fully automated refresh, use the built-in `-Loop` mode in `Invoke-HalcyonTok
 
 ### ConvertFrom-HalcyonJwt.ps1
 
-**Version:** v1.0  
+**Version:** v1.0
 **Purpose:** Shared helper. Decodes JWT tokens and extracts expiry metadata. Dot-sourced automatically by other scripts -- you do not call this directly.
 
 **Exported functions:**
@@ -146,7 +160,7 @@ For fully automated refresh, use the built-in `-Loop` mode in `Invoke-HalcyonTok
 
 ### Get-HalcyonBearerToken.ps1
 
-**Version:** v1.2  
+**Version:** v1.2
 **Purpose:** Authenticates against the Halcyon identity endpoint. Prompts for Tenant ID, email, and password interactively. Zeroes the plaintext password from memory immediately after the request.
 
 **Parameters:**
@@ -175,7 +189,7 @@ $auth.TenantId
 
 ### Invoke-HalcyonTokenRefresh.ps1
 
-**Version:** v1.2  
+**Version:** v1.2
 **Purpose:** Exchanges a refresh token for a new access token and refresh token pair. Supports single refresh, pipeline chaining, and a continuous loop mode for long-running integrations. The server rotates the refresh token on every call -- always use the latest one.
 
 **Parameters:**
@@ -211,9 +225,229 @@ $auth = .\Invoke-HalcyonTokenRefresh.ps1 -AuthObject $auth -silent
 
 ---
 
+### Get-HalcyonAlerts.ps1
+
+**Version:** v1.0
+**Purpose:** Retrieves alerts from the Halcyon API with filtering, automatic pagination, and flexible output options. Designed for SIEM ingestion pipelines, POV closeout reporting, and interactive investigation.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-AuthObject` | PSCustomObject | | Auth object from `Get-HalcyonBearerToken.ps1` |
+| `-AccessToken` | string | | Access token (alternative to `-AuthObject`) |
+| `-TenantId` | string | | Tenant ID (alternative to `-AuthObject`) |
+| `-Type` | string | | `BadBehavior`, `BruteForceAttempt`, `Dxp`, `MaliciousExecutable`, `VulnerableDriver` |
+| `-Action` | string | | `Block` or `Report` |
+| `-TriageStatus` | string | | `New` or `Reviewed` |
+| `-DisplayStatus` | string | | `Hidden` or `Visible` |
+| `-FirstSeenAfter` | datetime | | Filter alerts by first occurrence start |
+| `-FirstSeenBefore` | datetime | | Filter alerts by first occurrence end |
+| `-LastSeenAfter` | datetime | | Filter alerts by last occurrence start |
+| `-LastSeenBefore` | datetime | | Filter alerts by last occurrence end |
+| `-OffendingSha256` | string[] | | SHA256 prefix filter (1-64 hex chars, partial match supported) |
+| `-AlertId` | string[] | | One or more specific alert IDs (64-char hex) |
+| `-Page` | int | 1 | Starting page |
+| `-PageSize` | int | 100 | Results per page (10, 30, 50, 100) |
+| `-AllPages` | switch | off | Walk all result pages automatically |
+| `-SortBy` | string | LastSeen | `Action`, `AlertId`, `AssetCount`, `Count`, `FirstSeen`, `Kind`, `LastSeen`, `OffendingSha256` |
+| `-SortOrder` | string | Desc | `Asc` or `Desc` |
+| `-Format` | string | JSON | `JSON` or `CSV` |
+| `-OutFile` | string | | Write output to this file path |
+| `-silent` | switch | off | Suppress decorative output |
+
+**Returns:** Array of alert objects (PSCustomObject). Also writes to `-OutFile` if specified.
+
+> **Output formats:** JSON (default) preserves full object fidelity including nested process trees, asset details, and artifact metadata -- use this for SIEM ingestion. CSV flattens to top-level alert fields and is better suited for human review in Excel.
+
+**Usage:**
+
+```powershell
+# All alerts from the last 7 days
+.\Get-HalcyonAlerts.ps1 -AuthObject $auth -LastSeenAfter (Get-Date).AddDays(-7)
+
+# All blocked alerts, all pages, saved to JSON
+.\Get-HalcyonAlerts.ps1 -AuthObject $auth -Action Block -AllPages `
+    -OutFile "blocked_alerts.json"
+
+# POV closeout -- all activity since evaluation start
+.\Get-HalcyonAlerts.ps1 -AuthObject $auth -FirstSeenAfter "2026-02-10" `
+    -AllPages -OutFile "pov_alerts.json"
+
+# Hunt a specific hash across all pages
+.\Get-HalcyonAlerts.ps1 -AuthObject $auth -OffendingSha256 "d3f1164e" -AllPages
+
+# Export as CSV for Excel review
+.\Get-HalcyonAlerts.ps1 -AuthObject $auth -AllPages -Format CSV -OutFile "alerts.csv"
+
+# Pipeline -- filter results further in PowerShell
+$alerts = .\Get-HalcyonAlerts.ps1 -AuthObject $auth -AllPages -silent
+$alerts | Where-Object { $_.totalOccurrences -gt 10 }
+```
+
+---
+
+### Get-HalcyonDevices.ps1
+
+**Version:** v1.0
+**Purpose:** Retrieves registered devices from a Halcyon tenant. Includes a dedicated duplicate detection mode for VDI environments where the same hostname may appear multiple times with different Asset IDs.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-AuthObject` | PSCustomObject | | Auth object from `Get-HalcyonBearerToken.ps1` |
+| `-AccessToken` | string | | Access token (alternative to `-AuthObject`) |
+| `-TenantId` | string | | Tenant ID (alternative to `-AuthObject`) |
+| `-Name` | string | | Device name substring filter (contains match) |
+| `-OperatingSystem` | string | | OS name filter |
+| `-AgentVersion` | string | | Agent version filter |
+| `-Search` | string | | Generic search term matched against device properties |
+| `-Page` | int | 1 | Starting page |
+| `-PageSize` | int | 100 | Results per page (10, 30, 50, 100) |
+| `-AllPages` | switch | off | Walk all result pages automatically |
+| `-SortBy` | string | registeredDate | `agentVersion`, `heartbeat`, `name`, `osName`, `registeredDate` |
+| `-SortOrder` | string | Desc | `Asc` or `Desc` |
+| `-FindDuplicates` | switch | off | Enable VDI duplicate detection mode |
+| `-HeartbeatThresholdDays` | int | 7 | Days without heartbeat before flagging as NoContact |
+| `-OutFile` | string | | Write output to this JSON file |
+| `-silent` | switch | off | Suppress decorative output |
+
+**Duplicate status values (when `-FindDuplicates` is set):**
+
+| Status | Meaning |
+|---|---|
+| `Unique` | Only one device with this name, within heartbeat threshold |
+| `Keeper` | Most recently active registration in a duplicate group |
+| `Stale` | Older registration in a duplicate group -- candidate for removal |
+| `NoContact` | No heartbeat within `-HeartbeatThresholdDays` |
+
+**Returns:** Array of device objects. When `-FindDuplicates` is set, each object includes a `duplicateStatus` field.
+
+**Usage:**
+
+```powershell
+# List all devices
+.\Get-HalcyonDevices.ps1 -AuthObject $auth -AllPages
+
+# Find duplicate VDI registrations
+.\Get-HalcyonDevices.ps1 -AuthObject $auth -FindDuplicates -AllPages
+
+# Find duplicates and devices silent for more than 14 days
+.\Get-HalcyonDevices.ps1 -AuthObject $auth -FindDuplicates `
+    -HeartbeatThresholdDays 14 -AllPages
+
+# Collect stale IDs for removal
+$stale = .\Get-HalcyonDevices.ps1 -AuthObject $auth -FindDuplicates -AllPages -silent |
+         Where-Object { $_.duplicateStatus -eq "Stale" }
+```
+
+See [VDI Device Hygiene](#vdi-device-hygiene) for the full removal workflow.
+
+---
+
+### Remove-HalcyonDevice.ps1
+
+**Version:** v1.0
+**Purpose:** Marks a stale device registration for deletion. Deletion is asynchronous (202 Accepted) and will be reflected in the console shortly after the call. Designed to work in pipeline with `Get-HalcyonDevices.ps1 -FindDuplicates`.
+
+> **CAUTION:** Only delete devices confirmed to be stale. Removing an active endpoint requires reinstallation of the Halcyon agent to restore protection and console visibility. Always use `-WhatIf` to preview before executing.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `-AuthObject` | PSCustomObject | Yes* | Auth object from `Get-HalcyonBearerToken.ps1` |
+| `-AccessToken` | string | Yes* | Access token (alternative to `-AuthObject`) |
+| `-TenantId` | string | Yes* | Tenant ID (alternative to `-AuthObject`) |
+| `-DeviceId` | string | Yes | UUID of the device to delete |
+| `-WhatIf` | switch | No | Preview without deleting |
+| `-Confirm:$false` | | No | Skip the confirmation prompt |
+| `-silent` | switch | No | Suppress decorative output |
+
+*One of `-AuthObject` or both `-AccessToken` and `-TenantId` required.
+
+**Returns:** API response object on successful deletion.
+
+**Usage:**
+
+```powershell
+# Preview (no deletion)
+.\Remove-HalcyonDevice.ps1 -AuthObject $auth -DeviceId "xxxxxxxx-..." -WhatIf
+
+# Delete with confirmation prompt
+.\Remove-HalcyonDevice.ps1 -AuthObject $auth -DeviceId "xxxxxxxx-..."
+
+# Delete without prompt (scripted)
+.\Remove-HalcyonDevice.ps1 -AuthObject $auth -DeviceId "xxxxxxxx-..." -Confirm:$false
+```
+
+---
+
+### Get-HalcyonOverrides.ps1
+
+**Version:** v1.0
+**Purpose:** Retrieves the override list for a tenant with rich filtering. Provides the read side of the override management toolkit alongside `New-HalcyonOverride.ps1` and `Remove-HalcyonOverride.ps1`. Useful for hygiene audits, POV closeout verification, and confirming that API-created overrides match what is displayed in the console.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `-AuthObject` | PSCustomObject | Auth object from `Get-HalcyonBearerToken.ps1` |
+| `-AccessToken` | string | Access token (alternative to `-AuthObject`) |
+| `-TenantId` | string | Tenant ID (alternative to `-AuthObject`) |
+| `-Kind` | string | `Certificate`, `Dns`, `Driver`, `File`, `IpAddress` |
+| `-Action` | string[] | `Allow`, `Block`, `Bypass` -- accepts multiple values |
+| `-TargetKind` | string | `Asset` or `Tenant` |
+| `-AssetId` | string | Filter to overrides for a specific asset (UUID) |
+| `-AssetName` | string | Filter to overrides for a specific asset (name) |
+| `-AlertId` | string | Filter to overrides linked to a specific alert (64-char hex) |
+| `-CreatedAfter` | datetime | Overrides created after this date |
+| `-CreatedBefore` | datetime | Overrides created before this date |
+| `-CreatedBy` | string | Filter by creator email or username |
+| `-CertThumbprint` | string | Filter by certificate thumbprint |
+| `-CertSubjectDN` | string | Filter by certificate subject DN |
+| `-OffendingSha256` | string | Filter by file or driver SHA256 prefix |
+| `-FileCopyright` | string | Filter by file copyright field |
+| `-FileProductName` | string | Filter by file product name |
+| `-OffendingCidr` | string | Filter by IP/CIDR rule |
+| `-OffendingDns` | string | Filter by DNS rule |
+| `-Page` | int | Starting page (default: 1) |
+| `-PageSize` | int | Results per page (default: 100) |
+| `-AllPages` | switch | Walk all pages automatically |
+| `-SortBy` | string | Default: CreatedAt |
+| `-SortOrder` | string | `Asc` or `Desc` (default: Desc) |
+| `-OutFile` | string | Write results to this JSON file |
+| `-silent` | switch | Suppress decorative output |
+
+**Returns:** Array of override objects (PSCustomObject).
+
+**Usage:**
+
+```powershell
+# List all overrides
+.\Get-HalcyonOverrides.ps1 -AuthObject $auth -AllPages
+
+# Audit all Certificate overrides
+.\Get-HalcyonOverrides.ps1 -AuthObject $auth -Kind Certificate -AllPages
+
+# Show Allow and Bypass overrides created in the last 30 days
+.\Get-HalcyonOverrides.ps1 -AuthObject $auth -Action Allow,Bypass `
+    -CreatedAfter (Get-Date).AddDays(-30) -AllPages
+
+# Find overrides for a specific asset
+.\Get-HalcyonOverrides.ps1 -AuthObject $auth `
+    -AssetId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# Save full override list to JSON
+.\Get-HalcyonOverrides.ps1 -AuthObject $auth -AllPages -OutFile "overrides_audit.json"
+```
+
+---
+
 ### New-HalcyonOverride.ps1
 
-**Version:** v1.1  
+**Version:** v1.1
 **Purpose:** Creates a Halcyon override for any supported artifact type. Supports all five API artifact kinds, tenant-wide or asset-scoped targeting, and optional notes with newline support.
 
 **Parameters:**
@@ -236,7 +470,6 @@ $auth = .\Invoke-HalcyonTokenRefresh.ps1 -AuthObject $auth -silent
 | `-DnsName` | string | Conditional | Hostname or domain (Dns) |
 | `-Note` | string | No | Optional note, max 280 chars. Supports newlines -- see [Working with Notes](#working-with-notes) |
 | `-WhatIf` | switch | No | Preview the request without submitting |
-| `-silent` | switch | No | Suppress decorative output |
 
 *One of `-AuthObject` or both `-AccessToken` and `-TenantId` required.
 
@@ -281,7 +514,7 @@ Write-Host "Created override ID: $($result.id)"
 
 ### Remove-HalcyonOverride.ps1
 
-**Version:** v1.0  
+**Version:** v1.0
 **Purpose:** Deletes a Halcyon override by its numeric ID. Requires `Admin` RBAC role.
 
 **Parameters:**
@@ -314,43 +547,6 @@ $result = .\New-HalcyonOverride.ps1 -AuthObject $auth -Kind Certificate `
 ```
 
 ---
-
-### Invoke-HalcyonOverrideTests.ps1
-
-**Version:** v1.1  
-**Purpose:** Live test harness for override creation and deletion. Runs four test cases against a real tenant, pausing between each add and remove so you can verify the result in the console before continuing. All output is written to a timestamped log file.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|---|---|---|
-| `-AuthObject` | PSCustomObject | Auth object from `Get-HalcyonBearerToken.ps1` |
-| `-SkipCertTest` | switch | Skip Test 1 (Certificate) |
-| `-SkipFileTest` | switch | Skip Test 2 (File / Hash) |
-| `-SkipMonitorTest` | switch | Skip Test 3 (Monitor) |
-| `-SkipNoteTest` | switch | Skip Test 4 (Multi-line note) |
-
-**Test cases:**
-
-| Test | Type | What it validates |
-|---|---|---|
-| 1 | Certificate | Creates a self-signed cert, submits thumbprint as Allow override, deletes. Self-signed cert is removed from the cert store on completion. |
-| 2 | File / Hash | Creates an Allow override using a synthetic all-zero SHA256, deletes. |
-| 3 | Monitor | Creates a Bypass override using a synthetic all-F SHA256, deletes. |
-| 4 | Note | Creates a Certificate override with a multi-line backtick-n note. Verifies rendering in the console Certificate tab, deletes. |
-
-**Usage:**
-
-```powershell
-$auth = .\Get-HalcyonBearerToken.ps1
-.\Invoke-HalcyonOverrideTests.ps1 -AuthObject $auth
-
-# Run only the note test
-.\Invoke-HalcyonOverrideTests.ps1 -AuthObject $auth `
-    -SkipCertTest -SkipFileTest -SkipMonitorTest
-```
-
-Log files are written to the same directory as the script with the format `HalcyonOverrideTest_YYYYMMDD_HHmmss.log`.
 
 ### Get-HalcyonWhoAmI.ps1
 
@@ -577,6 +773,63 @@ This matches the format used by the Halcyon console and makes API-created overri
 
 ---
 
+## VDI Device Hygiene
+
+In VDI environments, Halcyon agents can register multiple times under the same hostname as machines are rebuilt or re-imaged. Each registration creates a new Asset ID. Only the most recently active registration is valid -- older entries are orphans that consume license count and clutter the console.
+
+**Recommended workflow:**
+
+```powershell
+# Step 1 -- authenticate
+$auth = .\Get-HalcyonBearerToken.ps1
+
+# Step 2 -- find all stale registrations
+$stale = .\Get-HalcyonDevices.ps1 -AuthObject $auth `
+             -FindDuplicates -HeartbeatThresholdDays 7 -AllPages -silent |
+         Where-Object { $_.duplicateStatus -eq "Stale" }
+
+# Step 3 -- review before acting
+$stale | Select-Object id, name, heartbeat, registered_date
+
+# Step 4 -- preview deletions
+$stale | ForEach-Object {
+    .\Remove-HalcyonDevice.ps1 -AuthObject $auth -DeviceId $_.id -WhatIf
+}
+
+# Step 5 -- execute after review
+$stale | ForEach-Object {
+    .\Remove-HalcyonDevice.ps1 -AuthObject $auth -DeviceId $_.id -Confirm:$false
+}
+```
+
+The `duplicateStatus` field on each device tells you exactly why it was flagged:
+
+- `Stale` -- older duplicate registration, safe to remove
+- `NoContact` -- no heartbeat within the threshold, investigate before removing
+- `Keeper` -- the active registration in a duplicate group, do not remove
+- `Unique` -- no duplicates found for this hostname
+
+---
+
+## SIEM Integration
+
+`Get-HalcyonAlerts.ps1` is designed for SIEM ingestion pipelines. JSON output preserves full alert object fidelity including nested process trees, asset details, and artifact metadata.
+
+**Daily pull pattern (Splunk, Elastic, Sentinel):**
+
+```powershell
+$filename = "halcyon_alerts_{0}.json" -f (Get-Date -Format "yyyyMMdd_HHmmss")
+
+$auth = .\Get-HalcyonBearerToken.ps1 -silent
+.\Get-HalcyonAlerts.ps1 -AuthObject $auth `
+    -LastSeenAfter (Get-Date).AddHours(-24) `
+    -AllPages -Format JSON -OutFile $filename -silent
+```
+
+The resulting file is a flat JSON array ready for ingestion by any SIEM that accepts JSON input. For incremental pulls, use `-LastSeenAfter` with the timestamp of your last successful run to avoid duplicate ingestion.
+
+---
+
 ## Versioning
 
 Script versions follow `vMAJOR.MINOR` in the file header. The version is bumped on every meaningful change:
@@ -593,9 +846,12 @@ All scripts are deployed to the repository root. When updating a script, bump th
 | `ConvertFrom-HalcyonJwt.ps1` | v1.0 |
 | `Get-HalcyonBearerToken.ps1` | v1.2 |
 | `Invoke-HalcyonTokenRefresh.ps1` | v1.2 |
+| `Get-HalcyonAlerts.ps1` | v1.0 |
+| `Get-HalcyonDevices.ps1` | v1.0 |
+| `Remove-HalcyonDevice.ps1` | v1.0 |
+| `Get-HalcyonOverrides.ps1` | v1.0 |
 | `New-HalcyonOverride.ps1` | v1.1 |
 | `Remove-HalcyonOverride.ps1` | v1.0 |
-| `Invoke-HalcyonOverrideTests.ps1` | v1.1 |
 | `Get-HalcyonWhoAmI.ps1` | v1.0 |
 | `Get-HalcyonAuditLog.ps1` | v1.0 |
 

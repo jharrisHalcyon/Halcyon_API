@@ -25,3 +25,4 @@ Desktop.ini
 *.p12
 *.pem
 *.der
+Invoke-Halcyon*Tests.ps1
