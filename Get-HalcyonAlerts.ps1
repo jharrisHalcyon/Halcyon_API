@@ -2,7 +2,7 @@
 # Get-HalcyonAlerts.ps1
 # Author  : Jim Harris -- Halcyon SA
 # Date    : 2026-02-26
-# Version : v1.0
+# Version : v1.1
 #
 # Retrieves alerts from the Halcyon API with rich filtering, automatic
 # pagination, and flexible output options. Designed for SIEM ingestion
@@ -286,6 +286,7 @@ if ($Format -eq "JSON") {
 elseif ($Format -eq "CSV") {
 
     # Flatten top-level fields for CSV -- nested objects are serialized as strings
+    # SHA256 lives at summary.artifact.sha256 (not a top-level field)
     $flat = $allAlerts | ForEach-Object {
         $alert = $_
         [PSCustomObject]@{
@@ -300,6 +301,7 @@ elseif ($Format -eq "CSV") {
             totalOccurrences = $alert.totalOccurrences
             assetCount       = $alert.assetCount
             tenantId         = $alert.tenantId
+            sha256           = $alert.summary.artifact.sha256
         }
     }
 

@@ -2,7 +2,7 @@
 # Get-HalcyonBearerToken.ps1
 # Author  : Jim Harris -- Halcyon Senior SA
 # Date    : 2026-02-24
-# Version : v1.2
+# Version : v1.3
 #
 # Authenticates against the Halcyon Identity endpoint and returns a Bearer
 # token for use in subsequent API calls. Prompts interactively for Tenant ID,
@@ -20,6 +20,10 @@
 # For long-running scripts or SOC integrations, use Invoke-HalcyonTokenRefresh.ps1
 # to exchange the refresh token for a new access token before it expires.
 #
+# Optionally, place a config.cfg file in the same directory as this script to
+# skip interactive prompts. Use -UseConfig to load credentials from it.
+# config.cfg is excluded from source control via .gitignore.
+#
 # Usage:
 #   .\Get-HalcyonBearerToken.ps1
 #
@@ -28,8 +32,12 @@
 #   $auth.AccessToken
 #   $auth.RefreshToken
 #
+#   Load credentials from config.cfg (non-interactive):
+#   $auth = .\Get-HalcyonBearerToken.ps1 -UseConfig
+#
 #   Suppress all decorative output (errors and warnings still show):
 #   $auth = .\Get-HalcyonBearerToken.ps1 -silent
+#   $auth = .\Get-HalcyonBearerToken.ps1 -UseConfig -silent
 #
 #   Tenant ID is not displayed in the Halcyon console UI. To retrieve yours,
 #   contact support@halcyon.ai with your org name and console email address.
@@ -55,7 +63,12 @@
 param(
     # Suppress all decorative console output. Errors and warnings are always
     # shown regardless. Useful when calling from automation or a test harness.
-    [switch]$silent
+    [switch]$silent,
+
+    # Load credentials from config.cfg instead of prompting interactively.
+    # Searches for config.cfg in the script directory first, then the current
+    # working directory. Expected fields: TENANTID, USERNAME, PASSWORD.
+    [switch]$UseConfig
 )
 
 $ErrorActionPreference = "Stop"
@@ -69,16 +82,71 @@ if (-not $silent) {
     Write-Host ""
 }
 
-# Prompt for required inputs
-$TenantId       = Read-Host "Enter Tenant ID"
-$Username       = Read-Host "Enter Halcyon Login Email"
-$SecurePassword = Read-Host "Enter Halcyon Password" -AsSecureString
+##############################################################################
+# Resolve credentials -- config file or interactive prompts
+##############################################################################
 
-$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword)
+$TenantId      = $null
+$Username      = $null
+$PlainPassword = $null
+$bstr          = [IntPtr]::Zero
+
+if ($UseConfig) {
+
+    # Search for config.cfg in script directory first, then current directory
+    $configPath = $null
+    foreach ($candidate in @(
+        (Join-Path $PSScriptRoot "config.cfg"),
+        (Join-Path (Get-Location).Path "config.cfg")
+    )) {
+        if (Test-Path $candidate) { $configPath = $candidate; break }
+    }
+
+    if (-not $configPath) {
+        Write-Error "config.cfg not found. Searched:`n  $(Join-Path $PSScriptRoot 'config.cfg')`n  $(Join-Path (Get-Location).Path 'config.cfg')"
+    }
+
+    # Parse key=value pairs, skip blank lines and comments
+    $config = @{}
+    Get-Content $configPath | ForEach-Object {
+        if ($_ -match '^\s*([^#=]+?)\s*=\s*(.+?)\s*$') {
+            $config[$matches[1].Trim()] = $matches[2].Trim()
+        }
+    }
+
+    $TenantId      = $config['TENANTID']
+    $Username      = $config['USERNAME']
+    $PlainPassword = $config['PASSWORD']
+
+    if (-not $TenantId)      { Write-Error "config.cfg is missing the TENANTID field."   }
+    if (-not $Username)      { Write-Error "config.cfg is missing the USERNAME field."   }
+    if (-not $PlainPassword) { Write-Error "config.cfg is missing the PASSWORD field."   }
+
+    if (-not $silent) {
+        Write-Host "  Config       : $configPath" -ForegroundColor DarkCyan
+        Write-Host "  Tenant ID    : $TenantId"
+        Write-Host "  Username     : $Username"
+        Write-Host "  Password     : (loaded from config)" -ForegroundColor DarkCyan
+        Write-Host ""
+    }
+
+}
+else {
+
+    # Interactive prompts
+    $TenantId       = Read-Host "Enter Tenant ID"
+    $Username       = Read-Host "Enter Halcyon Login Email"
+    $SecurePassword = Read-Host "Enter Halcyon Password" -AsSecureString
+    $bstr           = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword)
+    $PlainPassword  = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+
+}
+
+##############################################################################
+# Authenticate
+##############################################################################
 
 try {
-    $PlainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-
     $Body = @{
         username = $Username
         password = $PlainPassword
@@ -96,8 +164,10 @@ try {
 
 }
 finally {
-    # Zero the plaintext password from memory regardless of success or failure
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    # Zero credentials from memory regardless of success or failure
+    if ($bstr -ne [IntPtr]::Zero) {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
     Remove-Variable PlainPassword -ErrorAction SilentlyContinue
     Remove-Variable Body          -ErrorAction SilentlyContinue
 }

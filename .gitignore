@@ -14,6 +14,9 @@ Desktop.ini
 # macOS filesystem noise
 .DS_Store
 
+# Config file -- contains plaintext credentials, never commit
+config.cfg
+
 # PowerShell credential exports (just in case)
 *.cred
 *.credential

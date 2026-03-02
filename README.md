@@ -27,6 +27,7 @@ PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public
   - [Remove-HalcyonOverride.ps1](#remove-halcyonoverrideps1)
   - [Get-HalcyonWhoAmI.ps1](#get-halcyonwhoamips1)
   - [Get-HalcyonAuditLog.ps1](#get-halcyonauditlogps1)
+  - [Get-HalcyonThreats.ps1](#get-halcyonthreatsp1)
 - [Override Types](#override-types)
   - [Certificate](#certificate-overrides)
   - [File / Hash](#file--hash-overrides)
@@ -47,7 +48,7 @@ PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public
 This repo provides a set of composable PowerShell scripts that wrap the Halcyon REST API. Scripts are designed to be run standalone or chained together via the pipeline -- the output of one script feeds naturally into the input of the next.
 
 ```
-Get-HalcyonBearerToken  -->  Get-HalcyonAlerts
+Get-HalcyonBearerToken  -->  Get-HalcyonAlerts  -->  Get-HalcyonThreats
                          -->  Get-HalcyonDevices  -->  Remove-HalcyonDevice
                          -->  Get-HalcyonOverrides
                          -->  New-HalcyonOverride
@@ -55,6 +56,7 @@ Get-HalcyonBearerToken  -->  Get-HalcyonAlerts
                          -->  Invoke-HalcyonTokenRefresh  -->  (loop)
                          -->  Get-HalcyonWhoAmI
                          -->  Get-HalcyonAuditLog
+                         -->  Get-HalcyonThreats
 ```
 
 All scripts follow PowerShell conventions: named parameters, `-WhatIf` support where destructive, structured `PSCustomObject` return values, and errors through the standard error stream.
@@ -641,6 +643,66 @@ $rows | Where-Object { $_.user -match "vancouverclinic" }
 
 ---
 
+### Get-HalcyonThreats.ps1
+
+**Version:** v1.0
+**Purpose:** Retrieves threat details from the Halcyon API for one or more SHA256 hashes. Threat IDs in Halcyon are the SHA256 hash of the file -- the same value found at `summary.artifact.sha256` on alert objects. Designed to be chained after `Get-HalcyonAlerts.ps1` to enrich alert data with file metadata, scoring, and sample availability.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-AuthObject` | PSCustomObject | | Auth object from `Get-HalcyonBearerToken.ps1` |
+| `-AccessToken` | string | | Access token (alternative to `-AuthObject`) |
+| `-TenantId` | string | | Tenant ID (alternative to `-AuthObject`) |
+| `-ThreatId` | string[] | | **Required.** One or more SHA256 hashes (64 hex chars) |
+| `-IncludeSummary` | switch | off | Also call `/summary` per threat -- returns score, adjustedScore, hasValidSignature, cert chain |
+| `-GetDownloadUrl` | switch | off | Also call `/download` per threat -- returns pre-signed sample download URL (requires User RBAC) |
+| `-Format` | string | JSON | `JSON` or `CSV` |
+| `-OutFile` | string | | Write output to this file path |
+| `-silent` | switch | off | Suppress decorative output |
+
+**Returns:** Array of threat objects (PSCustomObject) with fields: `threatId`, `found`, `available`, `allowed`, `name`, `file_type`, `file_size`, `sha1`, `md5`, `certificates`, `summary`, `downloadUrl`
+
+> **SHA256 field path:** The SHA256 hash on alert objects is at `summary.artifact.sha256`, not a top-level field. Always use this path when extracting hashes from alert pipeline output.
+
+**Usage:**
+
+```powershell
+# Single threat lookup
+.\Get-HalcyonThreats.ps1 -AuthObject $auth `
+    -ThreatId "d3f1164e8c5e6b1f9a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f"
+
+# Full detail -- core info + scoring + download URL
+.\Get-HalcyonThreats.ps1 -AuthObject $auth -ThreatId $hash `
+    -IncludeSummary -GetDownloadUrl
+
+# Pipeline from Get-HalcyonAlerts -- enrich all blocked alerts with threat data
+$alerts  = .\Get-HalcyonAlerts.ps1 -AuthObject $auth -Action Block -AllPages -silent
+$hashes  = $alerts | ForEach-Object { $_.summary.artifact.sha256 } |
+           Where-Object { $_ } | Sort-Object -Unique
+$threats = .\Get-HalcyonThreats.ps1 -AuthObject $auth -ThreatId $hashes -IncludeSummary
+
+# Save to JSON
+.\Get-HalcyonThreats.ps1 -AuthObject $auth -ThreatId $hashes `
+    -IncludeSummary -OutFile "threats.json"
+
+# Save to CSV (flattened -- score and signature fields included)
+.\Get-HalcyonThreats.ps1 -AuthObject $auth -ThreatId $hashes `
+    -IncludeSummary -Format CSV -OutFile "threats.csv"
+
+# Filter results in pipeline
+$threats | Where-Object { $_.available -eq $true -and $_.allowed -eq $false } |
+    Select-Object threatId, name, file_type, file_size | Format-Table -AutoSize
+```
+
+**Endpoints called:**
+- `GET /v1/threat/{threat_id}` — core threat info (RBAC: ReadOnly)
+- `GET /v1/threat/{threat_id}/summary` — scoring and cert chain (RBAC: ReadOnly, opt-in via `-IncludeSummary`)
+- `GET /v1/threat/{threat_id}/download` — pre-signed download URL (RBAC: User, opt-in via `-GetDownloadUrl`)
+
+---
+
 ## Override Types
 
 ### Certificate Overrides
@@ -846,7 +908,7 @@ All scripts are deployed to the repository root. When updating a script, bump th
 | `ConvertFrom-HalcyonJwt.ps1` | v1.0 |
 | `Get-HalcyonBearerToken.ps1` | v1.2 |
 | `Invoke-HalcyonTokenRefresh.ps1` | v1.2 |
-| `Get-HalcyonAlerts.ps1` | v1.0 |
+| `Get-HalcyonAlerts.ps1` | v1.1 |
 | `Get-HalcyonDevices.ps1` | v1.0 |
 | `Remove-HalcyonDevice.ps1` | v1.0 |
 | `Get-HalcyonOverrides.ps1` | v1.0 |
@@ -854,6 +916,7 @@ All scripts are deployed to the repository root. When updating a script, bump th
 | `Remove-HalcyonOverride.ps1` | v1.0 |
 | `Get-HalcyonWhoAmI.ps1` | v1.0 |
 | `Get-HalcyonAuditLog.ps1` | v1.0 |
+| `Get-HalcyonThreats.ps1` | v1.0 |
 
 ---
 

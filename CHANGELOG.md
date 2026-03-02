@@ -4,6 +4,34 @@ All notable changes to the Halcyon API PowerShell Toolkit are documented here.
 
 ---
 
+## [Unreleased] -- 2026-03-02
+
+### Added
+
+**Get-HalcyonBearerToken.ps1 (v1.2 → v1.3)**
+- Added `-UseConfig` switch. When specified, credentials are loaded from `config.cfg` instead of prompting interactively. Searches the script directory first, then the current working directory.
+- `config.cfg` fields: `TENANTID`, `USERNAME`, `PASSWORD`.
+- `config.cfg` is excluded from source control via `.gitignore`.
+- Credentials are still zeroed from memory in the `finally` block regardless of the credential source.
+
+**Get-HalcyonThreats.ps1 (v1.0)**
+- New script for retrieving threat details by SHA256 hash from the Halcyon API.
+- Accepts one or more SHA256 hashes (the `threat_id` in the v1 Threats API).
+- Designed for pipeline use after `Get-HalcyonAlerts.ps1` -- extract hashes via `summary.artifact.sha256`.
+- `-IncludeSummary` opt-in calls `/v1/threat/{id}/summary` per threat: score, adjustedScore, hasValidSignature, certificate chain.
+- `-GetDownloadUrl` opt-in calls `/v1/threat/{id}/download` per threat: pre-signed sample download URL (requires User RBAC).
+- Graceful 404 handling -- threats not in the Halcyon store are returned with `found = $false` rather than terminating.
+- Output formats: JSON (default, full fidelity) and CSV (flattened scalar fields including score and signature status).
+- Returns PSCustomObject array to pipeline for further filtering.
+
+### Fixed
+
+**Get-HalcyonAlerts.ps1 (v1.0 → v1.1)**
+- CSV output block was missing the SHA256 field. Added `sha256 = $alert.summary.artifact.sha256` to the flattened CSV object.
+- Note: the SHA256 hash is nested at `summary.artifact.sha256` on alert response objects, not a top-level field. Corrected documentation and pipeline examples accordingly.
+
+---
+
 ## [Unreleased] -- 2026-02-26
 
 ### Added
