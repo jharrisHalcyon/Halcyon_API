@@ -2,7 +2,7 @@
 # Get-HalcyonWhoAmI.ps1
 # Author  : Jim Harris -- Halcyon SA
 # Date    : 2026-02-25
-# Version : v1.0
+# Version : v1.1
 #
 # Diagnostic script. Calls three identity endpoints to display the current
 # user's profile, effective role, and full role list for the authenticated
@@ -40,13 +40,85 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Dot-source the shared JWT helper for token expiry checks
+. (Join-Path $PSScriptRoot "ConvertFrom-HalcyonJwt.ps1")
+
 # Resolve auth
 if ($AuthObject) {
     if (-not $AccessToken) { $AccessToken = $AuthObject.AccessToken }
     if (-not $TenantId)    { $TenantId    = $AuthObject.TenantId    }
 }
 if (-not $AccessToken -or -not $TenantId) {
-    Write-Error "Auth required. Pass -AuthObject from Get-HalcyonBearerToken.ps1."
+    Write-Host ""
+    Write-Host "  [FAIL] Auth required. Pass -AuthObject from Get-HalcyonBearerToken.ps1." -ForegroundColor Red
+    Write-Host ""
+    exit 1
+}
+
+##############################################################################
+# Token expiry check -- auto-refresh if access token is within 60 seconds of
+# expiry or already expired. Requires RefreshToken on the AuthObject.
+# If tokens were supplied directly (-AccessToken/-TenantId) with no AuthObject,
+# refresh is not possible -- a warning is shown and the script continues.
+##############################################################################
+
+$accessInfo = Get-HalcyonTokenExpiry -Token $AccessToken
+
+if ($accessInfo.SecondsRemaining -lt 60) {
+
+    $refreshToken = if ($AuthObject) { $AuthObject.RefreshToken } else { $null }
+
+    if (-not $refreshToken) {
+        # No refresh token available -- warn if expired, continue either way
+        if ($accessInfo.IsExpired) {
+            Write-Warning "Access token is expired and no RefreshToken is available. The API call will likely fail with 401. Re-authenticate with Get-HalcyonBearerToken.ps1."
+        } else {
+            Write-Warning "Access token expires in $($accessInfo.SecondsRemaining) seconds. No RefreshToken available to auto-refresh -- pass -AuthObject to enable auto-refresh."
+        }
+    }
+    else {
+        # Check refresh token before attempting
+        $refreshInfo = Get-HalcyonTokenExpiry -Token $refreshToken
+
+        if ($refreshInfo.IsExpired) {
+            Write-Host ""
+            Write-Host "  [FAIL] Both access and refresh tokens are expired." -ForegroundColor Red
+            Write-Host "         Re-authenticate with Get-HalcyonBearerToken.ps1." -ForegroundColor Yellow
+            Write-Host ""
+            exit 1
+        }
+
+        if ($accessInfo.IsExpired) {
+            Write-Host "  [TOKEN] Access token expired -- refreshing..." -ForegroundColor Yellow
+        } else {
+            Write-Host "  [TOKEN] Access token expires in $($accessInfo.SecondsRemaining)s -- refreshing proactively..." -ForegroundColor DarkCyan
+        }
+
+        try {
+            $newAuth = & (Join-Path $PSScriptRoot "Invoke-HalcyonTokenRefresh.ps1") `
+                -RefreshToken $refreshToken -TenantId $TenantId -silent
+
+            # Update local variable used to build headers
+            $AccessToken = $newAuth.AccessToken
+
+            # Update AuthObject in place so the caller's $auth reflects the new tokens
+            if ($AuthObject) {
+                $AuthObject.AccessToken      = $newAuth.AccessToken
+                $AuthObject.RefreshToken     = $newAuth.RefreshToken
+                $AuthObject.AccessExpiresAt  = $newAuth.AccessExpiresAt
+                $AuthObject.RefreshExpiresAt = $newAuth.RefreshExpiresAt
+            }
+
+            Write-Host "  [TOKEN] Refreshed. New expiry: $($newAuth.AccessExpiresAt)" -ForegroundColor Green
+        }
+        catch {
+            Write-Host ""
+            Write-Host "  [FAIL] Token auto-refresh failed: $_" -ForegroundColor Red
+            Write-Host "         Re-authenticate with Get-HalcyonBearerToken.ps1." -ForegroundColor Yellow
+            Write-Host ""
+            exit 1
+        }
+    }
 }
 
 $headers = @{
