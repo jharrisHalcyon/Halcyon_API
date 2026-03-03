@@ -1,6 +1,6 @@
 ##############################################################################
 # Get-HalcyonAlerts.ps1
-# Author  : Jim Harris -- Halcyon SA
+# Author  : Jim Harris -- Halcyon Solutions Architect
 # Date    : 2026-02-26
 # Version : v1.2
 #

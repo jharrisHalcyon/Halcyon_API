@@ -1,6 +1,6 @@
 ##############################################################################
 # Remove-HalcyonOverride.ps1
-# Author  : Jim Harris -- Halcyon SA
+# Author  : Jim Harris -- Halcyon Solutions Architect
 # Date    : 2026-02-24
 # Version : v1.1
 #

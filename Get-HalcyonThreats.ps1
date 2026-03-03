@@ -1,6 +1,6 @@
 ##############################################################################
 # Get-HalcyonThreats.ps1
-# Author  : Jim Harris -- Halcyon SA
+# Author  : Jim Harris -- Halcyon Solutions Architect
 # Date    : 2026-03-02
 # Version : v1.1
 #

@@ -1,6 +1,6 @@
 ##############################################################################
 # Get-HalcyonWhoAmI.ps1
-# Author  : Jim Harris -- Halcyon SA
+# Author  : Jim Harris -- Halcyon Solutions Architect
 # Date    : 2026-02-25
 # Version : v1.1
 #
