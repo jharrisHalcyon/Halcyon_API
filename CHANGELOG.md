@@ -8,6 +8,18 @@ All notable changes to the Halcyon API PowerShell Toolkit are documented here.
 
 ### Added
 
+**Auto token refresh -- all API scripts (v1.x → v1.x+1)**
+- All API scripts now dot-source `ConvertFrom-HalcyonJwt.ps1` at startup.
+- Uniform token expiry check runs after auth resolution in every script. If the access token is within 60 seconds of expiry or already expired, the script attempts a proactive refresh via `Invoke-HalcyonTokenRefresh.ps1`.
+- With `-AuthObject`: refresh runs automatically and `$AuthObject` is updated in place so the caller's reference reflects new tokens.
+- Without `-AuthObject` (tokens passed directly): a `[WARN]` message is printed and the script continues without refreshing.
+- Both tokens expired: script exits with `[FAIL]` and instructs the user to re-authenticate.
+- Version bumps: Get-HalcyonAlerts (v1.1→v1.2), Get-HalcyonDevices (v1.0→v1.1), Remove-HalcyonDevice (v1.0→v1.1), Get-HalcyonOverrides (v1.0→v1.1), New-HalcyonOverride (v1.1→v1.2), Remove-HalcyonOverride (v1.0→v1.1), Get-HalcyonWhoAmI (v1.0→v1.1), Get-HalcyonAuditLog (v1.0→v1.1), Get-HalcyonThreats (v1.0→v1.1).
+
+**Get-HalcyonWhoAmI.ps1 (v1.0 → v1.1)**
+- Replaced `Write-Warning` calls in the no-RefreshToken path with `[WARN]`-styled `Write-Host` output, consistent with the Halcyon error style used across all scripts.
+- Added `Requires` section to header comment listing `ConvertFrom-HalcyonJwt.ps1` dependency.
+
 **Get-HalcyonBearerToken.ps1 (v1.2 → v1.3)**
 - Added `-UseConfig` switch. When specified, credentials are loaded from `config.cfg` instead of prompting interactively. Searches the script directory first, then the current working directory.
 - `config.cfg` fields: `TENANTID`, `USERNAME`, `PASSWORD`.

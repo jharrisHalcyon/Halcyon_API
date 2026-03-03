@@ -2,7 +2,7 @@
 # Get-HalcyonDevices.ps1
 # Author  : Jim Harris -- Halcyon SA
 # Date    : 2026-02-26
-# Version : v1.0
+# Version : v1.1
 #
 # Retrieves devices (endpoints) registered in a Halcyon tenant. Supports
 # standard listing with filters as well as a dedicated duplicate detection
@@ -63,6 +63,7 @@
 #   Valid Halcyon Bearer token (use Get-HalcyonBearerToken.ps1)
 #   Outbound HTTPS to api.halcyon.ai
 #   RBAC role: ReadOnly or higher
+#   ConvertFrom-HalcyonJwt.ps1 (same directory -- token expiry checks)
 #
 # Endpoints:
 #   GET https://api.halcyon.ai/search/devices        (list)
@@ -132,6 +133,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Dot-source the shared JWT helper for token expiry checks
+. (Join-Path $PSScriptRoot "ConvertFrom-HalcyonJwt.ps1")
+
 ##############################################################################
 # Resolve auth
 ##############################################################################
@@ -146,6 +150,65 @@ if (-not $AccessToken) {
 }
 if (-not $TenantId) {
     Write-Error "TenantId is required. Pass -AuthObject from Get-HalcyonBearerToken.ps1 or supply -TenantId directly."
+}
+
+##############################################################################
+# Token expiry check -- auto-refresh if access token is within 60 seconds of
+# expiry or already expired. Requires RefreshToken on the AuthObject.
+# If tokens were supplied directly (-AccessToken/-TenantId) with no AuthObject,
+# refresh is not possible -- a warning is shown and the script continues.
+##############################################################################
+
+$accessInfo = Get-HalcyonTokenExpiry -Token $AccessToken
+
+if ($accessInfo.SecondsRemaining -lt 60) {
+
+    $refreshToken = if ($AuthObject) { $AuthObject.RefreshToken } else { $null }
+
+    if (-not $refreshToken) {
+        Write-Host ""
+        if ($accessInfo.IsExpired) {
+            Write-Host "  [WARN] Access token is expired and no RefreshToken is available." -ForegroundColor Yellow
+            Write-Host "         The API call will likely return 401. Re-authenticate with Get-HalcyonBearerToken.ps1." -ForegroundColor Yellow
+        } else {
+            Write-Host "  [WARN] Access token expires in $($accessInfo.SecondsRemaining)s. Pass -AuthObject to enable auto-refresh." -ForegroundColor Yellow
+        }
+        Write-Host ""
+    }
+    else {
+        $refreshInfo = Get-HalcyonTokenExpiry -Token $refreshToken
+        if ($refreshInfo.IsExpired) {
+            Write-Host ""
+            Write-Host "  [FAIL] Both access and refresh tokens are expired." -ForegroundColor Red
+            Write-Host "         Re-authenticate with Get-HalcyonBearerToken.ps1." -ForegroundColor Yellow
+            Write-Host ""
+            exit 1
+        }
+        if ($accessInfo.IsExpired) {
+            Write-Host "  [TOKEN] Access token expired -- refreshing..." -ForegroundColor Yellow
+        } else {
+            Write-Host "  [TOKEN] Access token expires in $($accessInfo.SecondsRemaining)s -- refreshing proactively..." -ForegroundColor DarkCyan
+        }
+        try {
+            $newAuth = & (Join-Path $PSScriptRoot "Invoke-HalcyonTokenRefresh.ps1") `
+                -RefreshToken $refreshToken -TenantId $TenantId -silent
+            $AccessToken = $newAuth.AccessToken
+            if ($AuthObject) {
+                $AuthObject.AccessToken      = $newAuth.AccessToken
+                $AuthObject.RefreshToken     = $newAuth.RefreshToken
+                $AuthObject.AccessExpiresAt  = $newAuth.AccessExpiresAt
+                $AuthObject.RefreshExpiresAt = $newAuth.RefreshExpiresAt
+            }
+            Write-Host "  [TOKEN] Refreshed. New expiry: $($newAuth.AccessExpiresAt)" -ForegroundColor Green
+        }
+        catch {
+            Write-Host ""
+            Write-Host "  [FAIL] Token auto-refresh failed: $_" -ForegroundColor Red
+            Write-Host "         Re-authenticate with Get-HalcyonBearerToken.ps1." -ForegroundColor Yellow
+            Write-Host ""
+            exit 1
+        }
+    }
 }
 
 $headers = @{

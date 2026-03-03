@@ -15,6 +15,7 @@ PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public
   - [Service Accounts and SSO](#service-accounts-and-sso)
   - [Token Lifetimes](#token-lifetimes)
   - [Token Strategy for Automation](#token-strategy-for-automation)
+- [Script Dependencies](#script-dependencies)
 - [Scripts Reference](#scripts-reference)
   - [ConvertFrom-HalcyonJwt.ps1](#convertfrom-halcyonjwtps1)
   - [Get-HalcyonBearerToken.ps1](#get-halcyonbearertokenps1)
@@ -144,6 +145,38 @@ For fully automated refresh, use the built-in `-Loop` mode in `Invoke-HalcyonTok
 
 ---
 
+## Script Dependencies
+
+All API scripts (except `Get-HalcyonBearerToken.ps1` and `Invoke-HalcyonTokenRefresh.ps1`) dot-source `ConvertFrom-HalcyonJwt.ps1` at startup:
+
+```powershell
+. (Join-Path $PSScriptRoot "ConvertFrom-HalcyonJwt.ps1")
+```
+
+This provides the `Get-HalcyonTokenExpiry` function used for automatic token refresh. **All scripts must reside in the same directory.** If you run a script from a different working directory, use the full path or `Set-Location` to the API folder first.
+
+### Auto Token Refresh
+
+Every API script checks whether the access token is within 60 seconds of expiry before making any API calls. If so:
+
+- **With `-AuthObject`** -- the script calls `Invoke-HalcyonTokenRefresh.ps1` automatically, updates `$AuthObject` in place so the caller's reference reflects the new tokens, and proceeds transparently.
+- **Without `-AuthObject`** (tokens passed directly via `-AccessToken`/`-TenantId`) -- a `[WARN]` message is printed and the script continues. Refresh is not possible without the `RefreshToken` from an `$auth` object.
+- **Both tokens expired** -- the script exits with `[FAIL]` and instructs you to re-authenticate.
+
+The caller's `$auth` object is updated in place on refresh, so long-running pipelines stay current without additional code:
+
+```powershell
+$auth = .\Get-HalcyonBearerToken.ps1
+
+# Tokens are refreshed automatically inside each script as needed
+$alerts    = .\Get-HalcyonAlerts.ps1    -AuthObject $auth -AllPages -silent
+$hashes    = $alerts | ForEach-Object { $_.summary.artifact.sha256 } | Where-Object { $_ } | Sort-Object -Unique
+$threats   = .\Get-HalcyonThreats.ps1  -AuthObject $auth -ThreatId $hashes -silent
+$overrides = .\Get-HalcyonOverrides.ps1 -AuthObject $auth -silent
+```
+
+---
+
 ## Scripts Reference
 
 ### ConvertFrom-HalcyonJwt.ps1
@@ -162,7 +195,7 @@ For fully automated refresh, use the built-in `-Loop` mode in `Invoke-HalcyonTok
 
 ### Get-HalcyonBearerToken.ps1
 
-**Version:** v1.2
+**Version:** v1.3
 **Purpose:** Authenticates against the Halcyon identity endpoint. Prompts for Tenant ID, email, and password interactively. Zeroes the plaintext password from memory immediately after the request.
 
 **Parameters:**
@@ -229,7 +262,7 @@ $auth = .\Invoke-HalcyonTokenRefresh.ps1 -AuthObject $auth -silent
 
 ### Get-HalcyonAlerts.ps1
 
-**Version:** v1.0
+**Version:** v1.2
 **Purpose:** Retrieves alerts from the Halcyon API with filtering, automatic pagination, and flexible output options. Designed for SIEM ingestion pipelines, POV closeout reporting, and interactive investigation.
 
 **Parameters:**
@@ -291,7 +324,7 @@ $alerts | Where-Object { $_.totalOccurrences -gt 10 }
 
 ### Get-HalcyonDevices.ps1
 
-**Version:** v1.0
+**Version:** v1.1
 **Purpose:** Retrieves registered devices from a Halcyon tenant. Includes a dedicated duplicate detection mode for VDI environments where the same hostname may appear multiple times with different Asset IDs.
 
 **Parameters:**
@@ -350,7 +383,7 @@ See [VDI Device Hygiene](#vdi-device-hygiene) for the full removal workflow.
 
 ### Remove-HalcyonDevice.ps1
 
-**Version:** v1.0
+**Version:** v1.1
 **Purpose:** Marks a stale device registration for deletion. Deletion is asynchronous (202 Accepted) and will be reflected in the console shortly after the call. Designed to work in pipeline with `Get-HalcyonDevices.ps1 -FindDuplicates`.
 
 > **CAUTION:** Only delete devices confirmed to be stale. Removing an active endpoint requires reinstallation of the Halcyon agent to restore protection and console visibility. Always use `-WhatIf` to preview before executing.
@@ -388,7 +421,7 @@ See [VDI Device Hygiene](#vdi-device-hygiene) for the full removal workflow.
 
 ### Get-HalcyonOverrides.ps1
 
-**Version:** v1.0
+**Version:** v1.1
 **Purpose:** Retrieves the override list for a tenant with rich filtering. Provides the read side of the override management toolkit alongside `New-HalcyonOverride.ps1` and `Remove-HalcyonOverride.ps1`. Useful for hygiene audits, POV closeout verification, and confirming that API-created overrides match what is displayed in the console.
 
 **Parameters:**
@@ -449,7 +482,7 @@ See [VDI Device Hygiene](#vdi-device-hygiene) for the full removal workflow.
 
 ### New-HalcyonOverride.ps1
 
-**Version:** v1.1
+**Version:** v1.2
 **Purpose:** Creates a Halcyon override for any supported artifact type. Supports all five API artifact kinds, tenant-wide or asset-scoped targeting, and optional notes with newline support.
 
 **Parameters:**
@@ -516,7 +549,7 @@ Write-Host "Created override ID: $($result.id)"
 
 ### Remove-HalcyonOverride.ps1
 
-**Version:** v1.0
+**Version:** v1.1
 **Purpose:** Deletes a Halcyon override by its numeric ID. Requires `Admin` RBAC role.
 
 **Parameters:**
@@ -552,7 +585,7 @@ $result = .\New-HalcyonOverride.ps1 -AuthObject $auth -Kind Certificate `
 
 ### Get-HalcyonWhoAmI.ps1
 
-**Version:** v1.0
+**Version:** v1.1
 **Purpose:** Identity and RBAC diagnostic. Calls three identity endpoints in a single pass to display the current user's profile, effective role in the authenticated tenant, and all roles across all tenants. Prints a capability summary showing which operations are available at the current RBAC level.
 
 **Parameters:**
@@ -592,7 +625,7 @@ Write-Host "Effective role: $($me.EffectiveRole)"
 
 ### Get-HalcyonAuditLog.ps1
 
-**Version:** v1.0
+**Version:** v1.1
 **Purpose:** Exports the audit log for a tenant as CSV, polls until the async report job completes, downloads the result, and optionally filters rows by keyword. Useful for confirming specific actions such as policy changes by a particular user or email domain.
 
 **Parameters:**
@@ -645,7 +678,7 @@ $rows | Where-Object { $_.user -match "vancouverclinic" }
 
 ### Get-HalcyonThreats.ps1
 
-**Version:** v1.0
+**Version:** v1.1
 **Purpose:** Retrieves threat details from the Halcyon API for one or more SHA256 hashes. Threat IDs in Halcyon are the SHA256 hash of the file -- the same value found at `summary.artifact.sha256` on alert objects. Designed to be chained after `Get-HalcyonAlerts.ps1` to enrich alert data with file metadata, scoring, and sample availability.
 
 **Parameters:**
@@ -906,17 +939,17 @@ All scripts are deployed to the repository root. When updating a script, bump th
 | Script | Version |
 |---|---|
 | `ConvertFrom-HalcyonJwt.ps1` | v1.0 |
-| `Get-HalcyonBearerToken.ps1` | v1.2 |
+| `Get-HalcyonBearerToken.ps1` | v1.3 |
 | `Invoke-HalcyonTokenRefresh.ps1` | v1.2 |
-| `Get-HalcyonAlerts.ps1` | v1.1 |
-| `Get-HalcyonDevices.ps1` | v1.0 |
-| `Remove-HalcyonDevice.ps1` | v1.0 |
-| `Get-HalcyonOverrides.ps1` | v1.0 |
-| `New-HalcyonOverride.ps1` | v1.1 |
-| `Remove-HalcyonOverride.ps1` | v1.0 |
-| `Get-HalcyonWhoAmI.ps1` | v1.0 |
-| `Get-HalcyonAuditLog.ps1` | v1.0 |
-| `Get-HalcyonThreats.ps1` | v1.0 |
+| `Get-HalcyonAlerts.ps1` | v1.2 |
+| `Get-HalcyonDevices.ps1` | v1.1 |
+| `Remove-HalcyonDevice.ps1` | v1.1 |
+| `Get-HalcyonOverrides.ps1` | v1.1 |
+| `New-HalcyonOverride.ps1` | v1.2 |
+| `Remove-HalcyonOverride.ps1` | v1.1 |
+| `Get-HalcyonWhoAmI.ps1` | v1.1 |
+| `Get-HalcyonAuditLog.ps1` | v1.1 |
+| `Get-HalcyonThreats.ps1` | v1.1 |
 
 ---
 

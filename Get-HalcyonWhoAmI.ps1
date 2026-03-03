@@ -28,6 +28,13 @@
 #   Or pass tokens directly:
 #   .\Get-HalcyonWhoAmI.ps1 -AccessToken $token -TenantId $tid
 #
+# Requires:
+#   PowerShell 5.1+
+#   Valid Halcyon Bearer token (use Get-HalcyonBearerToken.ps1)
+#   Outbound HTTPS to api.halcyon.ai
+#   RBAC role: ReadOnly or higher
+#   ConvertFrom-HalcyonJwt.ps1 (same directory -- token expiry checks)
+#
 ##############################################################################
 
 #Requires -Version 5.1
@@ -69,12 +76,14 @@ if ($accessInfo.SecondsRemaining -lt 60) {
     $refreshToken = if ($AuthObject) { $AuthObject.RefreshToken } else { $null }
 
     if (-not $refreshToken) {
-        # No refresh token available -- warn if expired, continue either way
+        Write-Host ""
         if ($accessInfo.IsExpired) {
-            Write-Warning "Access token is expired and no RefreshToken is available. The API call will likely fail with 401. Re-authenticate with Get-HalcyonBearerToken.ps1."
+            Write-Host "  [WARN] Access token is expired and no RefreshToken is available." -ForegroundColor Yellow
+            Write-Host "         The API call will likely return 401. Re-authenticate with Get-HalcyonBearerToken.ps1." -ForegroundColor Yellow
         } else {
-            Write-Warning "Access token expires in $($accessInfo.SecondsRemaining) seconds. No RefreshToken available to auto-refresh -- pass -AuthObject to enable auto-refresh."
+            Write-Host "  [WARN] Access token expires in $($accessInfo.SecondsRemaining)s. Pass -AuthObject to enable auto-refresh." -ForegroundColor Yellow
         }
+        Write-Host ""
     }
     else {
         # Check refresh token before attempting
