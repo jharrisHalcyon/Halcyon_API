@@ -2,7 +2,7 @@
 # Get-HalcyonOverrides.ps1
 # Author  : Jim Harris -- Halcyon Solutions Architect
 # Date    : 2026-02-26
-# Version : v1.1
+# Version : v1.2
 #
 # Retrieves the override list for a Halcyon tenant with rich filtering.
 # Useful for hygiene audits, POV closeout verification, and confirming that
@@ -314,10 +314,10 @@ do {
         }
     }
 
-    if ($currentPage -eq $Page -and $response.totalPages) {
-        $totalPages = $response.totalPages
+    if ($currentPage -eq $Page -and $response.pagination.totalPages) {
+        $totalPages = $response.pagination.totalPages
         if (-not $silent) {
-            Write-Host "  Total overrides : $($response.total)" -ForegroundColor White
+            Write-Host "  Total overrides : $($response.pagination.totalItems)" -ForegroundColor White
             Write-Host "  Total pages     : $totalPages (fetching $(if ($AllPages) { 'all' } else { 'page 1 only' }))" -ForegroundColor White
             Write-Host ""
         }

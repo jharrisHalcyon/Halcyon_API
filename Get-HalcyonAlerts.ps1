@@ -2,7 +2,7 @@
 # Get-HalcyonAlerts.ps1
 # Author  : Jim Harris -- Halcyon Solutions Architect
 # Date    : 2026-02-26
-# Version : v1.2
+# Version : v1.3
 #
 # Retrieves alerts from the Halcyon API with rich filtering, automatic
 # pagination, and flexible output options. Designed for SIEM ingestion
@@ -300,10 +300,10 @@ do {
     }
 
     # Determine total page count from first response
-    if ($currentPage -eq $Page -and $response.totalPages) {
-        $totalPages = $response.totalPages
+    if ($currentPage -eq $Page -and $response.pagination.totalPages) {
+        $totalPages = $response.pagination.totalPages
         if (-not $silent) {
-            Write-Host "  Total alerts : $($response.total)" -ForegroundColor White
+            Write-Host "  Total alerts : $($response.pagination.totalItems)" -ForegroundColor White
             Write-Host "  Total pages  : $totalPages (fetching $(if ($AllPages) { 'all' } else { 'page 1 only' }))" -ForegroundColor White
             Write-Host ""
         }

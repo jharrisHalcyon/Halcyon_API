@@ -2,7 +2,7 @@
 # Get-HalcyonDevices.ps1
 # Author  : Jim Harris -- Halcyon Solutions Architect
 # Date    : 2026-02-26
-# Version : v1.1
+# Version : v1.2
 #
 # Retrieves devices (endpoints) registered in a Halcyon tenant. Supports
 # standard listing with filters as well as a dedicated duplicate detection
@@ -282,10 +282,10 @@ do {
         }
     }
 
-    if ($currentPage -eq $Page -and $response.totalPages) {
-        $totalPages = $response.totalPages
+    if ($currentPage -eq $Page -and $response.pagination.totalPages) {
+        $totalPages = $response.pagination.totalPages
         if (-not $silent) {
-            Write-Host "  Total devices : $($response.total)" -ForegroundColor White
+            Write-Host "  Total devices : $($response.pagination.totalItems)" -ForegroundColor White
             Write-Host "  Total pages   : $totalPages (fetching $(if ($AllPages) { 'all' } else { 'page 1 only' }))" -ForegroundColor White
             Write-Host ""
         }
