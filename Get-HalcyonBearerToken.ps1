@@ -2,7 +2,7 @@
 # Get-HalcyonBearerToken.ps1
 # Author  : Jim Harris -- Halcyon Solutions Architect
 # Date    : 2026-02-24
-# Version : v1.3
+# Version : v1.5
 #
 # Authenticates against the Halcyon Identity endpoint and returns a Bearer
 # token for use in subsequent API calls. Prompts interactively for Tenant ID,
@@ -35,9 +35,25 @@
 #   Load credentials from config.cfg (non-interactive):
 #   $auth = .\Get-HalcyonBearerToken.ps1 -UseConfig
 #
+#   Load credentials from a SecretManagement vault (recommended for production):
+#   $auth = .\Get-HalcyonBearerToken.ps1 -UseSecrets -VaultName HalcyonVault
+#
+#   Multiple tenants in one vault -- use -SecretPrefix to separate them:
+#   $auth = .\Get-HalcyonBearerToken.ps1 -UseSecrets -VaultName HalcyonVault -SecretPrefix HalcyonProd
+#   # Reads secrets: HalcyonProdTenantId, HalcyonProdUsername, HalcyonProdPassword
+#
+#   One-time SecretManagement setup:
+#   Install-Module Microsoft.PowerShell.SecretManagement -Repository PSGallery -Force
+#   Install-Module Microsoft.PowerShell.SecretStore       -Repository PSGallery -Force
+#   Register-SecretVault -Name HalcyonVault -ModuleName Microsoft.PowerShell.SecretStore
+#   Set-Secret -Vault HalcyonVault -Name HalcyonTenantId -Secret "your-tenant-id"
+#   Set-Secret -Vault HalcyonVault -Name HalcyonUsername  -Secret "user@example.com"
+#   Set-Secret -Vault HalcyonVault -Name HalcyonPassword  -Secret "your-password"
+#
 #   Suppress all decorative output (errors and warnings still show):
 #   $auth = .\Get-HalcyonBearerToken.ps1 -silent
 #   $auth = .\Get-HalcyonBearerToken.ps1 -UseConfig -silent
+#   $auth = .\Get-HalcyonBearerToken.ps1 -UseSecrets -VaultName HalcyonVault -silent
 #
 #   Tenant ID is not displayed in the Halcyon console UI. To retrieve yours,
 #   contact support@halcyon.ai with your org name and console email address.
@@ -68,7 +84,22 @@ param(
     # Load credentials from config.cfg instead of prompting interactively.
     # Searches for config.cfg in the script directory first, then the current
     # working directory. Expected fields: TENANTID, USERNAME, PASSWORD.
-    [switch]$UseConfig
+    [switch]$UseConfig,
+
+    # Load credentials from a PowerShell SecretManagement vault.
+    # Recommended for production automation -- credentials are encrypted at rest.
+    # Requires: Microsoft.PowerShell.SecretManagement + Microsoft.PowerShell.SecretStore
+    # See script header for one-time setup steps.
+    [switch]$UseSecrets,
+
+    # Name of the SecretManagement vault to read from.
+    # If omitted, the default registered vault is used.
+    [string]$VaultName,
+
+    # Prefix for secret names in the vault (default: "Halcyon").
+    # Secrets are expected as: ${SecretPrefix}TenantId, ${SecretPrefix}Username, ${SecretPrefix}Password
+    # Use different prefixes to manage multiple tenants in one vault.
+    [string]$SecretPrefix = "Halcyon"
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,7 +114,7 @@ if (-not $silent) {
 }
 
 ##############################################################################
-# Resolve credentials -- config file or interactive prompts
+# Resolve credentials -- vault, config file, or interactive prompts
 ##############################################################################
 
 $TenantId      = $null
@@ -106,11 +137,14 @@ if ($UseConfig) {
         Write-Error "config.cfg not found. Searched:`n  $(Join-Path $PSScriptRoot 'config.cfg')`n  $(Join-Path (Get-Location).Path 'config.cfg')"
     }
 
-    # Parse key=value pairs, skip blank lines and comments
+    # Parse key=value pairs, skip blank lines and comments.
+    # Inline comments (whitespace + #) are stripped from values so that
+    # entries like:  TENANTID=abc-123  # my-tenant
+    # are read as:   TENANTID=abc-123
     $config = @{}
     Get-Content $configPath | ForEach-Object {
         if ($_ -match '^\s*([^#=]+?)\s*=\s*(.+?)\s*$') {
-            $config[$matches[1].Trim()] = $matches[2].Trim()
+            $config[$matches[1].Trim()] = ($matches[2] -replace '\s+#.*$', '').Trim()
         }
     }
 
@@ -127,6 +161,55 @@ if ($UseConfig) {
         Write-Host "  Tenant ID    : $TenantId"
         Write-Host "  Username     : $Username"
         Write-Host "  Password     : (loaded from config)" -ForegroundColor DarkCyan
+        Write-Host ""
+    }
+
+}
+elseif ($UseSecrets) {
+
+    # Verify SecretManagement module is installed
+    if (-not (Get-Module -ListAvailable -Name Microsoft.PowerShell.SecretManagement)) {
+        Write-Host ""
+        Write-Host "  [FAIL] Microsoft.PowerShell.SecretManagement is not installed." -ForegroundColor Red
+        Write-Host "         Run: Install-Module Microsoft.PowerShell.SecretManagement -Repository PSGallery -Force" -ForegroundColor Yellow
+        Write-Host "              Install-Module Microsoft.PowerShell.SecretStore       -Repository PSGallery -Force" -ForegroundColor Yellow
+        Write-Host ""
+        exit 1
+    }
+
+    $tidName   = "${SecretPrefix}TenantId"
+    $userName  = "${SecretPrefix}Username"
+    $passName  = "${SecretPrefix}Password"
+
+    $secretParams = @{ AsPlainText = $true }
+    if ($VaultName) { $secretParams['Vault'] = $VaultName }
+
+    try {
+        $TenantId      = Get-Secret -Name $tidName  @secretParams
+        $Username      = Get-Secret -Name $userName  @secretParams
+        $PlainPassword = Get-Secret -Name $passName  @secretParams
+    }
+    catch {
+        Write-Host ""
+        Write-Host "  [FAIL] Could not retrieve secrets: $_" -ForegroundColor Red
+        Write-Host "         Expected secret names: $tidName, $userName, $passName" -ForegroundColor Yellow
+        if ($VaultName) { Write-Host "         Vault: $VaultName" -ForegroundColor Yellow }
+        Write-Host "         Run Set-Secret to store them. See script header for setup steps." -ForegroundColor Yellow
+        Write-Host ""
+        exit 1
+    }
+
+    if (-not $TenantId)      { Write-Error "Secret '$tidName' is empty or missing."  }
+    if (-not $Username)      { Write-Error "Secret '$userName' is empty or missing."  }
+    if (-not $PlainPassword) { Write-Error "Secret '$passName' is empty or missing." }
+
+    if (-not $silent) {
+        $vaultDisplay = if ($VaultName) { $VaultName } else { "(default vault)" }
+        Write-Host "  Vault        : $vaultDisplay" -ForegroundColor DarkCyan
+        Write-Host "  Secret Prefix: $SecretPrefix"
+        Write-Host "  Tenant ID    : $TenantId"
+        Write-Host "  Username     : $Username"
+        Write-Host "  Password     : (loaded from vault)" -ForegroundColor DarkCyan
         Write-Host ""
     }
 
