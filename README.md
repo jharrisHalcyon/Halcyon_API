@@ -195,30 +195,54 @@ $overrides = .\Get-HalcyonOverrides.ps1 -AuthObject $auth -silent
 
 ### Get-HalcyonBearerToken.ps1
 
-**Version:** v1.3
-**Purpose:** Authenticates against the Halcyon identity endpoint. Prompts for Tenant ID, email, and password interactively. Zeroes the plaintext password from memory immediately after the request.
+**Version:** v1.5
+**Purpose:** Authenticates against the Halcyon identity endpoint. Supports interactive prompts, a config file (`-UseConfig`), and encrypted vault storage (`-UseSecrets`). Zeroes the plaintext password from memory immediately after the request.
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `-silent` | switch | off | Suppress all decorative output. Errors and warnings always show. Prompts still appear. |
+| `-silent` | switch | off | Suppress all decorative output. Errors and warnings always show. |
+| `-UseConfig` | switch | off | Load credentials from `config.cfg` instead of prompting. Searches script directory first, then current directory. Expected fields: `TENANTID`, `USERNAME`, `PASSWORD`. Inline comments (`# ...`) are stripped from values. |
+| `-UseSecrets` | switch | off | Load credentials from a PowerShell SecretManagement vault. Recommended for production automation. Requires `Microsoft.PowerShell.SecretManagement` + `Microsoft.PowerShell.SecretStore`. |
+| `-VaultName` | string | | Name of the SecretManagement vault. If omitted, the default registered vault is used. |
+| `-SecretPrefix` | string | `Halcyon` | Prefix for secret names in the vault. Reads `${Prefix}TenantId`, `${Prefix}Username`, `${Prefix}Password`. Use different prefixes to manage multiple tenants in one vault. |
 
 **Returns:** `PSCustomObject` with `AccessToken`, `RefreshToken`, `TenantId`, `AccessExpiresAt`, `RefreshExpiresAt`
 
 **Usage:**
 
 ```powershell
-# Interactive -- full output
+# Interactive -- prompts for Tenant ID, email, and password
 $auth = .\Get-HalcyonBearerToken.ps1
 
-# Silent -- prompts only, no banners or token details
-$auth = .\Get-HalcyonBearerToken.ps1 -silent
+# Load from config.cfg (non-interactive)
+$auth = .\Get-HalcyonBearerToken.ps1 -UseConfig
 
-# Access the token directly
-$auth.AccessToken
-$auth.TenantId
+# Load from SecretManagement vault
+$auth = .\Get-HalcyonBearerToken.ps1 -UseSecrets -VaultName HalcyonVault
+
+# Multiple tenants in one vault -- switch with -SecretPrefix
+$auth = .\Get-HalcyonBearerToken.ps1 -UseSecrets -VaultName HalcyonVault -SecretPrefix HalcyonProd
 ```
+
+**SecretManagement one-time setup:**
+
+```powershell
+# Install modules
+Install-Module Microsoft.PowerShell.SecretManagement -Repository PSGallery -Force
+Install-Module Microsoft.PowerShell.SecretStore       -Repository PSGallery -Force
+
+# Register an encrypted vault (once per machine/user)
+Register-SecretVault -Name HalcyonVault -ModuleName Microsoft.PowerShell.SecretStore
+
+# Store credentials -- first Set-Secret call will prompt for a vault password
+Set-Secret -Vault HalcyonVault -Name HalcyonTenantId -Secret "your-tenant-id"
+Set-Secret -Vault HalcyonVault -Name HalcyonUsername  -Secret "user@example.com"
+Set-Secret -Vault HalcyonVault -Name HalcyonPassword  -Secret "your-password"
+```
+
+> **Vault password:** You will be prompted to set a master password on first use. This encrypts all secrets in the vault. It is required once per PowerShell session the first time the vault is accessed. There is no recovery path if the password is lost — store it securely.
 
 ---
 
@@ -262,7 +286,7 @@ $auth = .\Invoke-HalcyonTokenRefresh.ps1 -AuthObject $auth -silent
 
 ### Get-HalcyonAlerts.ps1
 
-**Version:** v1.2
+**Version:** v1.3
 **Purpose:** Retrieves alerts from the Halcyon API with filtering, automatic pagination, and flexible output options. Designed for SIEM ingestion pipelines, POV closeout reporting, and interactive investigation.
 
 **Parameters:**
@@ -324,7 +348,7 @@ $alerts | Where-Object { $_.totalOccurrences -gt 10 }
 
 ### Get-HalcyonDevices.ps1
 
-**Version:** v1.1
+**Version:** v1.2
 **Purpose:** Retrieves registered devices from a Halcyon tenant. Includes a dedicated duplicate detection mode for VDI environments where the same hostname may appear multiple times with different Asset IDs.
 
 **Parameters:**
@@ -421,7 +445,7 @@ See [VDI Device Hygiene](#vdi-device-hygiene) for the full removal workflow.
 
 ### Get-HalcyonOverrides.ps1
 
-**Version:** v1.1
+**Version:** v1.2
 **Purpose:** Retrieves the override list for a tenant with rich filtering. Provides the read side of the override management toolkit alongside `New-HalcyonOverride.ps1` and `Remove-HalcyonOverride.ps1`. Useful for hygiene audits, POV closeout verification, and confirming that API-created overrides match what is displayed in the console.
 
 **Parameters:**
@@ -939,12 +963,12 @@ All scripts are deployed to the repository root. When updating a script, bump th
 | Script | Version |
 |---|---|
 | `ConvertFrom-HalcyonJwt.ps1` | v1.0 |
-| `Get-HalcyonBearerToken.ps1` | v1.3 |
+| `Get-HalcyonBearerToken.ps1` | v1.5 |
 | `Invoke-HalcyonTokenRefresh.ps1` | v1.2 |
-| `Get-HalcyonAlerts.ps1` | v1.2 |
-| `Get-HalcyonDevices.ps1` | v1.1 |
+| `Get-HalcyonAlerts.ps1` | v1.3 |
+| `Get-HalcyonDevices.ps1` | v1.2 |
 | `Remove-HalcyonDevice.ps1` | v1.1 |
-| `Get-HalcyonOverrides.ps1` | v1.1 |
+| `Get-HalcyonOverrides.ps1` | v1.2 |
 | `New-HalcyonOverride.ps1` | v1.2 |
 | `Remove-HalcyonOverride.ps1` | v1.1 |
 | `Get-HalcyonWhoAmI.ps1` | v1.1 |
