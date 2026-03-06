@@ -2,7 +2,7 @@
 # Set-HalcyonAssetPolicy.ps1
 # Author  : Jim Harris -- Halcyon Solutions Architect
 # Date    : 2026-03-05
-# Version : v1.0
+# Version : v1.1
 #
 # Applies a policy to Halcyon assets. Supports two targeting modes:
 #
@@ -427,7 +427,7 @@ else {
     if ($PSCmdlet.ShouldProcess("$($assetIds.Count) asset(s)", "Apply policy '$policyName'")) {
 
         $batchBody = @{
-            targets = @{ assetIds = $assetIds }
+            targets = @{ assetIds = [System.Collections.Generic.List[string]]$assetIds }
             updates = @{ policyGroupId = $PolicyId }
         } | ConvertTo-Json -Depth 5
 

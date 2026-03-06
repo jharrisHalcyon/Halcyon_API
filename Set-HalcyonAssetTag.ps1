@@ -2,7 +2,7 @@
 # Set-HalcyonAssetTag.ps1
 # Author  : Jim Harris -- Halcyon Solutions Architect
 # Date    : 2026-03-05
-# Version : v1.0
+# Version : v1.1
 #
 # Adds or removes tags on Halcyon assets. Tags are the underlying mechanism
 # for Search Groups in the Halcyon console.
@@ -291,11 +291,11 @@ if ($tagsToRemove.Count -gt 0) { $tagSummary += "remove: $($tagsToRemove -join '
 if ($PSCmdlet.ShouldProcess("$($assetIds.Count) asset(s)", "Tag operation -- $($tagSummary -join ' | ')")) {
 
     $updates = @{}
-    if ($tagsToAdd.Count -gt 0)    { $updates['tagsToAdd']    = $tagsToAdd    }
-    if ($tagsToRemove.Count -gt 0) { $updates['tagsToRemove'] = $tagsToRemove }
+    if ($tagsToAdd.Count -gt 0)    { $updates['tagsToAdd']    = [System.Collections.Generic.List[string]]@($tagsToAdd)    }
+    if ($tagsToRemove.Count -gt 0) { $updates['tagsToRemove'] = [System.Collections.Generic.List[string]]@($tagsToRemove) }
 
     $batchBody = @{
-        targets = @{ assetIds = $assetIds }
+        targets = @{ assetIds = [System.Collections.Generic.List[string]]$assetIds }
         updates = $updates
     } | ConvertTo-Json -Depth 5
 
