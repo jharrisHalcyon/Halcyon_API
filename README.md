@@ -1133,8 +1133,8 @@ All scripts are deployed to the repository root. When updating a script, bump th
 | `Get-HalcyonAuditLog.ps1` | v1.1 |
 | `Get-HalcyonThreats.ps1` | v1.1 |
 | `Get-HalcyonPolicies.ps1` | v1.0 |
-| `Set-HalcyonAssetTag.ps1` | v1.0 |
-| `Set-HalcyonAssetPolicy.ps1` | v1.0 |
+| `Set-HalcyonAssetTag.ps1` | v1.1 |
+| `Set-HalcyonAssetPolicy.ps1` | v1.1 |
 
 ---
 
