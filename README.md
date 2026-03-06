@@ -29,6 +29,9 @@ PowerShell scripts for interacting with the [Halcyon](https://halcyon.ai) public
   - [Get-HalcyonWhoAmI.ps1](#get-halcyonwhoamips1)
   - [Get-HalcyonAuditLog.ps1](#get-halcyonauditlogps1)
   - [Get-HalcyonThreats.ps1](#get-halcyonthreatsp1)
+  - [Get-HalcyonPolicies.ps1](#get-halcyonpoliciesps1)
+  - [Set-HalcyonAssetTag.ps1](#set-halcyonassettagps1)
+  - [Set-HalcyonAssetPolicy.ps1](#set-halcyonassetpolicyps1)
 - [Override Types](#override-types)
   - [Certificate](#certificate-overrides)
   - [File / Hash](#file--hash-overrides)
@@ -760,6 +763,161 @@ $threats | Where-Object { $_.available -eq $true -and $_.allowed -eq $false } |
 
 ---
 
+### Get-HalcyonPolicies.ps1
+
+**Version:** v1.0
+**Purpose:** Retrieves policies from the Halcyon tenant. The list endpoint returns summaries (name, ID, owner, isDefault). Use `-Id` for a single policy with full settings, or `-IncludeSettings` to fetch full settings for every returned policy (one extra API call per policy).
+
+> **Terminology:** What the API calls a "policy group" is referred to as a "policy" in this toolkit. The individual protection knobs inside a policy (Execution Prevention, Tamper Guard, etc.) are called "policy settings".
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-AuthObject` | PSCustomObject | | Auth object from `Get-HalcyonBearerToken.ps1` |
+| `-AccessToken` | string | | Access token (alternative to `-AuthObject`) |
+| `-TenantId` | string | | Tenant ID (alternative to `-AuthObject`) |
+| `-Id` | string | | UUID of a specific policy — returns full settings |
+| `-Name` | string | | Client-side name filter (case-insensitive contains match) |
+| `-AllPages` | switch | off | Walk all pages of results |
+| `-IncludeSettings` | switch | off | Fetch full policy settings for each returned policy (N+1 calls) |
+| `-OutFile` | string | | Write output to this file path (JSON) |
+| `-silent` | switch | off | Suppress decorative output |
+
+**Returns:** Array of policy objects (PSCustomObject). Summary objects include `id`, `name`, `owner`, `isDefault`. Detail objects add a `policies` property containing the 7 policy setting knobs.
+
+**Usage:**
+
+```powershell
+# List all policies
+.\Get-HalcyonPolicies.ps1 -AuthObject $auth
+
+# Get full settings for one policy
+.\Get-HalcyonPolicies.ps1 -AuthObject $auth -Id "uuid"
+
+# List all with full settings
+.\Get-HalcyonPolicies.ps1 -AuthObject $auth -IncludeSettings
+
+# Filter by name
+.\Get-HalcyonPolicies.ps1 -AuthObject $auth -Name "Strict"
+
+# Save to JSON
+.\Get-HalcyonPolicies.ps1 -AuthObject $auth -IncludeSettings -OutFile "policies.json"
+```
+
+**Endpoints called:**
+- `GET /v2/policy-groups` — list all policies (RBAC: ReadOnly)
+- `GET /v2/policy-groups/{id}` — single policy with full settings (RBAC: ReadOnly)
+
+---
+
+### Set-HalcyonAssetTag.ps1
+
+**Version:** v1.0
+**Purpose:** Adds or removes tags on Halcyon assets. Tags are the underlying mechanism for Search Groups in the Halcyon console. Assets can be specified by ID or hostname (or a mix) via a comma-separated string, a CSV file, or a one-per-line list file. The batch operation is asynchronous; the script polls until the job completes.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-AuthObject` | PSCustomObject | | Auth object from `Get-HalcyonBearerToken.ps1` |
+| `-AccessToken` | string | | Access token (alternative to `-AuthObject`) |
+| `-TenantId` | string | | Tenant ID (alternative to `-AuthObject`) |
+| `-Assets` | string | | Comma-separated asset IDs or hostnames |
+| `-CsvFile` | string | | CSV file with `id`, `assetId`, `name`, or `hostname` column |
+| `-ListFile` | string | | One asset ID or hostname per line (blank lines and `#` comments ignored) |
+| `-AddTag` | string | | Comma-separated tags to add |
+| `-RemoveTag` | string | | Comma-separated tags to remove |
+| `-PollIntervalSeconds` | int | 3 | How often to poll for job completion |
+| `-TimeoutSeconds` | int | 120 | Max wait time before giving up on polling |
+| `-WhatIf` | switch | off | Preview without applying |
+| `-silent` | switch | off | Suppress decorative output |
+
+At least one asset source (`-Assets`, `-CsvFile`, or `-ListFile`) and at least one tag operation (`-AddTag` or `-RemoveTag`) are required. Hostnames are resolved to asset IDs automatically via the assets search API.
+
+**Returns:** The batch job response object (`jobId`, `status`).
+
+**Usage:**
+
+```powershell
+# Add a tag by hostname
+.\Set-HalcyonAssetTag.ps1 -AuthObject $auth -Assets "DESKTOP-OHIMIC7" -AddTag "prod"
+
+# Add and remove tags in one call
+.\Set-HalcyonAssetTag.ps1 -AuthObject $auth -Assets "DESKTOP-OHIMIC7" -AddTag "prod" -RemoveTag "staging"
+
+# Tag from a CSV file
+.\Set-HalcyonAssetTag.ps1 -AuthObject $auth -CsvFile "assets.csv" -AddTag "vdi-pool-a"
+
+# Tag from a list file
+.\Set-HalcyonAssetTag.ps1 -AuthObject $auth -ListFile "hostnames.txt" -AddTag "prod"
+
+# Preview without applying
+.\Set-HalcyonAssetTag.ps1 -AuthObject $auth -Assets "DESKTOP-OHIMIC7" -AddTag "prod" -WhatIf
+
+# Skip confirmation prompt
+.\Set-HalcyonAssetTag.ps1 -AuthObject $auth -Assets "DESKTOP-OHIMIC7" -AddTag "prod" -Confirm:$false
+```
+
+**Endpoints called:**
+- `POST /v2/assets/search` — hostname resolution (RBAC: ReadOnly)
+- `POST /v2/assets/batch` — apply tag changes (RBAC: PowerUser)
+- `GET /v2/jobs/{jobId}` — poll for completion
+
+---
+
+### Set-HalcyonAssetPolicy.ps1
+
+**Version:** v1.0
+**Purpose:** Applies a Halcyon policy to a set of assets. Two targeting modes: by Search Group tag (applies to all assets with that tag), or by explicit asset list (comma-separated IDs/hostnames, CSV file, or list file). The policy can be specified by name or UUID. Requires PowerUser RBAC.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-AuthObject` | PSCustomObject | | Auth object from `Get-HalcyonBearerToken.ps1` |
+| `-AccessToken` | string | | Access token (alternative to `-AuthObject`) |
+| `-TenantId` | string | | Tenant ID (alternative to `-AuthObject`) |
+| `-Tag` | string | | Target assets by Search Group tag (mutually exclusive with `-Assets`/`-CsvFile`/`-ListFile`) |
+| `-Assets` | string | | Comma-separated asset IDs or hostnames |
+| `-CsvFile` | string | | CSV file with `id`, `assetId`, `name`, or `hostname` column |
+| `-ListFile` | string | | One asset ID or hostname per line |
+| `-Policy` | string | | Policy name (exact, case-insensitive) |
+| `-PolicyId` | string | | Policy UUID (alternative to `-Policy`) |
+| `-PollIntervalSeconds` | int | 3 | How often to poll for job completion |
+| `-TimeoutSeconds` | int | 120 | Max wait time before giving up on polling |
+| `-WhatIf` | switch | off | Preview without applying |
+| `-silent` | switch | off | Suppress decorative output |
+
+**Returns:** The batch job response object (`jobId`, `status`).
+
+**Usage:**
+
+```powershell
+# Apply policy to all assets in a Search Group (by tag)
+.\Set-HalcyonAssetPolicy.ps1 -AuthObject $auth -Tag "vdi-pool-a" -Policy "Prevention"
+
+# Apply policy to specific assets by hostname
+.\Set-HalcyonAssetPolicy.ps1 -AuthObject $auth -Assets "DESKTOP-OHIMIC7, Win0-d6c006" -Policy "Prevention"
+
+# Apply policy to assets from a CSV file
+.\Set-HalcyonAssetPolicy.ps1 -AuthObject $auth -CsvFile "assets.csv" -Policy "Harris-Prevent"
+
+# Specify policy by UUID instead of name
+.\Set-HalcyonAssetPolicy.ps1 -AuthObject $auth -Tag "prod" -PolicyId "uuid"
+
+# Preview without applying
+.\Set-HalcyonAssetPolicy.ps1 -AuthObject $auth -Tag "jimbo" -Policy "Detection" -WhatIf
+```
+
+**Endpoints called:**
+- `GET /v2/policy-groups` — policy name resolution (RBAC: ReadOnly)
+- `POST /v2/assets/search` — tag preview and hostname resolution (RBAC: ReadOnly)
+- `POST /v2/assets/batch` — apply policy assignment (RBAC: PowerUser)
+- `GET /v2/jobs/{jobId}` — poll for completion
+
+---
+
 ## Override Types
 
 ### Certificate Overrides
@@ -974,6 +1132,9 @@ All scripts are deployed to the repository root. When updating a script, bump th
 | `Get-HalcyonWhoAmI.ps1` | v1.1 |
 | `Get-HalcyonAuditLog.ps1` | v1.1 |
 | `Get-HalcyonThreats.ps1` | v1.1 |
+| `Get-HalcyonPolicies.ps1` | v1.0 |
+| `Set-HalcyonAssetTag.ps1` | v1.0 |
+| `Set-HalcyonAssetPolicy.ps1` | v1.0 |
 
 ---
 
