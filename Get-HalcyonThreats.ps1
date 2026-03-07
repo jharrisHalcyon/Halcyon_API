@@ -113,6 +113,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+try {
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]'Tls12,Tls13'
+} catch {
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]'Tls12'
+}
 
 # Dot-source the shared JWT helper for token expiry checks
 . (Join-Path $PSScriptRoot "ConvertFrom-HalcyonJwt.ps1")

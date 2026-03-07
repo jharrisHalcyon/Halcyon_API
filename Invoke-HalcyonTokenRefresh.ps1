@@ -106,6 +106,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+try {
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]'Tls12,Tls13'
+} catch {
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]'Tls12'
+}
 
 # Dot-source the shared JWT helper from the same directory as this script
 . (Join-Path $PSScriptRoot "ConvertFrom-HalcyonJwt.ps1")

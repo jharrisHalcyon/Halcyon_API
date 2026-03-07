@@ -31,6 +31,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+try {
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]'Tls12,Tls13'
+} catch {
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]'Tls12'
+}
 
 Write-Host ""
 Write-Host "=== Halcyon API Raw Auth Response Dump ===" -ForegroundColor Cyan
