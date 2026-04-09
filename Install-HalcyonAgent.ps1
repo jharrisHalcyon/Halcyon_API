@@ -23,7 +23,7 @@
 #   Via environment variables (unattended):
 #     $env:HAL_USER   = 'admin@example.com'
 #     $env:HAL_PASS   = 'yourpassword'
-#     $env:HAL_TENANT = '0546ca62-47db-4319-a89e-647764941bcf'
+#     $env:HAL_TENANT = 'xxxxxx-47db-4319-a89e-64776494xxxxx1bcf'
 #     .\Install-HalcyonAgent.ps1
 #
 #   Via config file (config.cfg in same directory):
